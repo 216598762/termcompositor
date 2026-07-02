@@ -161,6 +161,37 @@ anything other than an `UnsupportedProtocol` error.
 [`Protocol`]: https://docs.rs/dashcompositor/latest/dashcompositor/enum.Protocol.html
 
 
+
+### Streaming encode (v0.8.2)
+
+The v0.8.1 chunked encoder still materialised the
+entire framebuffer in a `Vec<u8>` (8MB+ for a 2MP image)
+before chunking. v0.8.2 adds a memory-bounded streaming
+entry point for callers that need true zero-copy output
+(to a file, socket, or terminal handle) or that want to
+encode multi-megapixel framebuffers without spiking
+memory:
+
+```rust,ignore
+use dashcompositor::encoder::kitty;
+use dashcompositor::framebuffer::FrameBuffer;
+use std::io::BufWriter;
+
+let fb = FrameBuffer::new(1920, 1080);
+let stdout = std::io::stdout();
+let mut writer = BufWriter::new(stdout.lock());
+kitty::encode_to_writer(&fb, &mut writer)?;
+```
+
+Peak working set is O(1) per chunk (~4KB scratch)
+regardless of framebuffer size; the v0.8.1 8MB+
+full-framebuffer copy is gone.
+
+The existing `kitty::encode(frame) -> Vec<u8>` entry
+point is preserved unchanged and is now implemented as
+a thin wrapper that delegates to the streaming path
+internally. Wire format is byte-for-byte equivalent to
+v0.8.1 for the same input.
 ### Tmux passthrough (v0.8.0)
 
 When the host is running inside tmux, the Kitty graphics

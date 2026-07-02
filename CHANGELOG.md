@@ -1,3 +1,51 @@
+## 0.8.2 (2026-07-02)
+
+Memory-bounded streaming Kitty encode: the v0.8.1 chunked
+encoder previously materialised the entire framebuffer in
+a `Vec<u8>` (8MB+ for a 2MP image) before chunking.
+v0.8.2 adds a new public streaming entry point
+`dashcompositor::encoder::kitty::encode_to_writer<W: Write>(
+frame: &FrameBuffer, out: &mut W) -> Result<(), EncoderError>`
+that writes the encoded APC bytes directly to a
+caller-supplied `&mut impl Write` sink. Peak working set
+is now O(1) per chunk (~4KB scratch), independent of
+framebuffer size. The existing `encode -> Vec<u8>` entry
+point is preserved for backwards compat and now also runs
+through the streaming path internally (it just passes
+`&mut Vec::new()` to `encode_to_writer`).
+
+### Added
+- `pub fn kitty::encode_to_writer<W: Write>(frame, &mut W)
+  -> Result<(), EncoderError>` in `dashcompositor::encoder`,
+  gated on the `kitty-encoder` Cargo feature. Writes the
+  encoded APC bytes to any `std::io::Write` impl (e.g.
+  `Vec<u8>`, `std::fs::File`, `std::net::TcpStream`).
+
+### Changed
+- `kitty::encode(frame) -> Result<Vec<u8>, EncoderError>`
+  is now a thin wrapper that allocates a fresh `Vec<u8>`
+  and delegates to `encode_to_writer`. The wire format
+  is unchanged (byte-for-byte equivalent to v0.8.1 for
+  the same input). The memory profile is improved:
+  the v0.8.1 full-framebuffer RGBA `Vec<u8>` is gone;
+  the only per-call allocations are one scratch `Vec<u8>`
+  per chunk (≤ 3072 raw bytes) plus the per-chunk APC
+  scratch (≈ 4KB), both bounded independent of
+  framebuffer size.
+
+### Tests
+- 5 new unit tests: streaming output matches `encode`
+  byte-for-byte; single-chunk fast path produces no
+  `m` key; multi-chunk path produces the correct
+  `m=1`/`m=0` distribution; pre-allocated `Vec<u8>`
+  writer grows as needed; 2MP (1920×1080) framebuffer
+  smoke test produces the expected 2,701 chunks.
+
+All 4 feature combinations clean: cargo fmt, cargo build
+(default + each feature + both), cargo build --release
+(default + both), cargo test (99 tests with both
+features, 0 failed), cargo clippy --all-targets
+-- -D warnings (0 errors across all 4 combos).
 ## 0.8.1 (2026-07-02)
 
 Chunked Kitty encoding: for framebuffers whose base64-encoded

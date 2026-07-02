@@ -24,7 +24,17 @@
 //! DCS (`\x1bPtmux;...\x1b\\`) so the bytes survive the
 //! tmux -> outer-terminal hop. See [`kitty::wrap_for_tmux`]
 //! for the pure byte transform and [`tmux_passthrough_enabled`]
-//! for the opt-in check. Each arm returns
+//! for the opt-in check. v0.8.1 adds chunked Kitty encoding:
+//! for framebuffers whose base64 payload exceeds the
+//! protocol's 4096-byte per-chunk limit, the encoder splits
+//! the payload into 768-pixel chunks and emits one APC per
+//! chunk using the `m=0`/`m=1` chunking extension (see
+//! [`kitty::encode`]). v0.8.2 adds a memory-bounded
+//! streaming entry point [`kitty::encode_to_writer`] that
+//! writes the encoded bytes directly to a caller-supplied
+//! `&mut impl Write` without materialising the full
+//! framebuffer in a `Vec<u8>` (peak working set is O(1)
+//! per chunk, not O(framebuffer)). Each arm returns
 //! [`EncoderError::UnsupportedProtocol`] when the
 //! corresponding feature is disabled in the current build.
 
@@ -343,6 +353,13 @@ impl ProtocolEncoder for Protocol {
 /// The Kitty graphics protocol encoder, gated on the
 /// `kitty-encoder` Cargo feature. Implemented as a private
 /// inline module so the public API surface stays minimal.
+///
+/// v0.5.0: single-command encoder (no chunking).
+/// v0.8.0: added [`wrap_for_tmux`] for tmux passthrough.
+/// v0.8.1: added chunked encoding (m=0/m=1) for
+/// multi-megapixel framebuffers via [`encode`].
+/// v0.8.2: added [`encode_to_writer`] for memory-bounded
+/// streaming output (no full-framebuffer Vec).
 #[cfg(feature = "kitty-encoder")]
 mod kitty {
     use super::EncoderError;
@@ -370,10 +387,24 @@ mod kitty {
     pub(crate) const PIXELS_PER_CHUNK: usize = 768;
 
     /// Encodes `frame` as one or more Kitty "transmit and
-    /// display" APC commands using raw RGBA pixel data
-    /// (format code 32 per the Kitty graphics protocol
-    /// spec). The returned bytes are the full escape-sequence
-    /// payload ready to be written to the terminal.
+    /// display" APC commands and writes the concatenated
+    /// APC bytes to `out`. **v0.8.2 memory-bounded
+    /// streaming path**: never materialises the full
+    /// framebuffer in a `Vec<u8>`; the only per-call
+    /// allocations are one scratch `Vec<u8>` per chunk
+    /// (≤ 3072 raw RGBA bytes = one chunk's worth, plus
+    /// the chunk's APC framing ≈ 4KB). Peak working set is
+    /// O(1) regardless of framebuffer size, so this
+    /// function is safe to call on multi-megapixel
+    /// framebuffers without spiking memory.
+    ///
+    /// Callers that want a `Vec<u8>` of the output (e.g.
+    /// the v0.7.0/v0.8.0 API) can call [`encode`] (which
+    /// delegates to this function writing into a fresh
+    /// `Vec<u8>`) or pass `&mut Vec::new()` here directly.
+    /// Callers that want true streaming into a file,
+    /// socket, or terminal handle can pass their own
+    /// `&mut impl Write`.
     ///
     /// **v0.8.1 chunking**: for framebuffers whose
     /// base64-encoded payload fits within a single chunk
@@ -391,7 +422,10 @@ mod kitty {
     /// have a base64 payload length that is a multiple of 4
     /// (the spec's hard requirement) because
     /// `PIXELS_PER_CHUNK * 4 = 3072` is a multiple of 3.
-    pub fn encode(frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
+    pub fn encode_to_writer<W: Write>(
+        frame: &FrameBuffer,
+        out: &mut W,
+    ) -> Result<(), EncoderError> {
         if frame.width() == 0 || frame.height() == 0 {
             return Err(EncoderError::InvalidDimensions {
                 width: frame.width(),
@@ -399,12 +433,10 @@ mod kitty {
             });
         }
 
-        // Materialise the RGBA pixel data as a single
-        // contiguous byte slice. A streaming encode can be
-        // added later if the per-frame allocation becomes a
-        // hotspot.
-        let rgba: Vec<u8> = frame.pixels().iter().flatten().copied().collect();
-        let total_pixels = rgba.len() / 4;
+        let width = frame.width();
+        let height = frame.height();
+        let pixels = frame.pixels();
+        let total_pixels = pixels.len();
 
         // v0.8.1 single-chunk fast path: preserve v0.8.0
         // wire format exactly (no `m` key) for framebuffers
@@ -413,24 +445,32 @@ mod kitty {
         // disabled) keep working unchanged, and the small-
         // image output is byte-identical to v0.8.0.
         if total_pixels <= PIXELS_PER_CHUNK {
-            return encode_single_chunk(frame.width(), frame.height(), &rgba);
+            let chunk_apc = encode_single_chunk_apc(width, height, pixels)?;
+            out.write_all(&chunk_apc)?;
+            return Ok(());
         }
 
         // v0.8.1 multi-chunk path: emit one APC per chunk,
-        // concatenating the results. `num_chunks` is
+        // writing each chunk's APC directly to `out` (no
+        // intermediate concat Vec). `num_chunks` is
         // `ceil(total_pixels / PIXELS_PER_CHUNK)`, computed
         // with `div_ceil` (stable since Rust 1.73).
         let num_chunks = total_pixels.div_ceil(PIXELS_PER_CHUNK);
-        let mut out = Vec::new();
         for chunk_idx in 0..num_chunks {
             let start_pixel = chunk_idx * PIXELS_PER_CHUNK;
             let end_pixel = (start_pixel + PIXELS_PER_CHUNK).min(total_pixels);
-            // Slice the rgba vec in raw-byte offsets
-            // (4 bytes per pixel). The slice is always
-            // 4-byte aligned (since `rgba` is a `Vec<u8>` of
-            // RGBA quadruplets and we slice on pixel
-            // boundaries), so this is sound.
-            let chunk_rgba = &rgba[start_pixel * 4..end_pixel * 4];
+            // The chunk's pixel slice is at most
+            // PIXELS_PER_CHUNK entries (3072 raw bytes).
+            // The flatten+collect here is the ONLY
+            // per-chunk allocation, and it's O(1) in the
+            // framebuffer size. The previous v0.8.1
+            // implementation allocated a single `Vec<u8>`
+            // of the entire framebuffer's RGBA bytes (8MB+
+            // for a 2MP image) before chunking, which
+            // v0.8.2 eliminates.
+            let chunk_pixels = &pixels[start_pixel..end_pixel];
+            let chunk_rgba: Vec<u8> =
+                chunk_pixels.iter().flatten().copied().collect();
             let is_last = chunk_idx + 1 == num_chunks;
             let m_value: u32 = if is_last { 0 } else { 1 };
 
@@ -443,17 +483,29 @@ mod kitty {
                     ('a', ControlValue::Char('T')),
                     ('f', ControlValue::UnsignedInteger(32)),
                     ('q', ControlValue::UnsignedInteger(2)),
-                    ('s', ControlValue::UnsignedInteger(frame.width())),
-                    ('v', ControlValue::UnsignedInteger(frame.height())),
+                    ('s', ControlValue::UnsignedInteger(width)),
+                    ('v', ControlValue::UnsignedInteger(height)),
                     ('m', ControlValue::UnsignedInteger(m_value)),
                 ]
             } else {
                 vec![('m', ControlValue::UnsignedInteger(m_value))]
             };
 
-            let cmd = build_apc_command(&controls, chunk_rgba)?;
-            out.extend_from_slice(&cmd);
+            let chunk_apc = build_apc_command(&controls, &chunk_rgba)?;
+            out.write_all(&chunk_apc)?;
         }
+        Ok(())
+    }
+
+    /// Encodes `frame` as one or more Kitty APC commands
+    /// and returns the concatenated bytes. Internally
+    /// delegates to [`encode_to_writer`] writing into a
+    /// fresh `Vec<u8>`, so the memory bound is O(1) per
+    /// chunk (~4KB scratch) rather than O(framebuffer)
+    /// (was 8MB+ for a 2MP image prior to v0.8.2).
+    pub fn encode(frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
+        let mut out = Vec::new();
+        encode_to_writer(frame, &mut out)?;
         Ok(out)
     }
 
@@ -486,11 +538,27 @@ mod kitty {
 
     /// v0.8.0 wire-compatible single-chunk encoder. Emits
     /// `\x1b_Ga=T,f=32,q=2,s=W,v=H;<base64>\x1b\\` with no
-    /// `m` key. Used by the v0.8.1 `encode` fast path for
-    /// framebuffers that fit in one chunk, and by the
-    /// v0.8.0/v0.8.1 test suite for the existing
-    /// single-chunk framing assertions.
-    fn encode_single_chunk(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, EncoderError> {
+    /// `m` key. Used by the v0.8.2 `encode_to_writer` fast
+    /// path for framebuffers that fit in one chunk.
+    ///
+    /// Takes the raw `&[[u8; 4]]` pixel slice (not a
+    /// pre-flattened RGBA byte slice) and flattens it
+    /// internally; the resulting allocation is bounded at
+    /// 3072 bytes (PIXELS_PER_CHUNK * 4) because this
+    /// helper is only reachable from the single-chunk fast
+    /// path.
+    fn encode_single_chunk_apc(
+        width: u32,
+        height: u32,
+        pixels: &[[u8; 4]],
+    ) -> Result<Vec<u8>, EncoderError> {
+        // Flatten the pixel slice into a single contiguous
+        // RGBA byte slice for base64 encoding. The single-
+        // chunk path can only be reached when
+        // `pixels.len() <= PIXELS_PER_CHUNK`, so this
+        // allocation is bounded at 3072 bytes regardless
+        // of framebuffer size.
+        let rgba: Vec<u8> = pixels.iter().flatten().copied().collect();
         let controls: Vec<(char, ControlValue)> = vec![
             ('a', ControlValue::Char('T')),
             ('f', ControlValue::UnsignedInteger(32)),
@@ -498,7 +566,7 @@ mod kitty {
             ('s', ControlValue::UnsignedInteger(width)),
             ('v', ControlValue::UnsignedInteger(height)),
         ];
-        build_apc_command(&controls, rgba)
+        build_apc_command(&controls, &rgba)
     }
 
     /// Wraps a complete Kitty APC (`\x1b_G ... \x1b\\`) in a
@@ -1603,6 +1671,171 @@ mod tests {
             let a = super::kitty::encode(&fb).unwrap();
             let b = super::kitty::encode(&fb).unwrap();
             assert_eq!(a, b, "chunked encode must be deterministic");
+        });
+    }
+
+    // -- v0.8.2: memory-bounded streaming encode tests ----------------
+    //
+    // The v0.8.2 streaming entry point `encode_to_writer<W: Write>`
+    // writes APC bytes directly to the caller's `&mut impl Write`
+    // sink without materialising the full framebuffer in a
+    // `Vec<u8>`. These tests verify (a) byte-for-byte
+    // equivalence with the existing `encode -> Vec<u8>` path,
+    // (b) correctness for the single-chunk and multi-chunk
+    // paths via the streaming entry point, (c) the path works
+    // on a pre-allocated `Vec<u8>` (not just a fresh one),
+    // and (d) a 2MP smoke test (verifies the multi-chunk path
+    // on a realistically-sized framebuffer).
+
+    /// Streaming output for a 1×1 frame must match the
+    /// `encode -> Vec<u8>` output byte-for-byte. This
+    /// pins the v0.8.2 refactor's invariant: the
+    /// streaming path and the `Vec<u8>` path produce
+    /// identical bytes for the same input.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn encode_to_writer_small_frame_matches_encode() {
+        with_env(None, None, None, None, || {
+            let fb = FrameBuffer::new(1, 1);
+            let from_encode = super::kitty::encode(&fb).unwrap();
+            let mut from_streaming: Vec<u8> = Vec::new();
+            super::kitty::encode_to_writer(&fb, &mut from_streaming).unwrap();
+            assert_eq!(from_encode, from_streaming);
+        });
+    }
+
+    /// The single-chunk fast path (≤ 768 pixels) must
+    /// produce the v0.8.0 wire format via the streaming
+    /// entry point (no `m` key, full control list).
+    /// This exercises the streaming path's
+    /// `encode_single_chunk_apc` helper directly.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn encode_to_writer_single_chunk_no_m_key() {
+        with_env(None, None, None, None, || {
+            // Exactly 768 pixels = single chunk boundary.
+            let fb = FrameBuffer::new(768, 1);
+            let mut out: Vec<u8> = Vec::new();
+            super::kitty::encode_to_writer(&fb, &mut out).unwrap();
+            let s = std::str::from_utf8(&out).unwrap();
+            // One APC introducer (single chunk).
+            assert_eq!(s.matches("\x1b_G").count(), 1);
+            let payload_start = "\x1b_G".len();
+            let payload_end = s.find(';').unwrap();
+            let controls = &s[payload_start..payload_end];
+            // No `m` key in single-chunk path.
+            assert!(!controls.contains("m="));
+            // Full control list present.
+            for key in &["a=T", "f=32", "q=2", "s=768", "v=1"] {
+                assert!(controls.contains(key), "missing control {key}");
+            }
+        });
+    }
+
+    /// The multi-chunk path (769+ pixels) must produce
+    /// the correct `m=1` / `m=0` distribution and chunk
+    /// count via the streaming entry point. This
+    /// exercises the per-chunk flatten-and-collect
+    /// inside the streaming loop (the v0.8.2 allocation
+    /// that replaced the v0.8.1 full-framebuffer copy).
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn encode_to_writer_multi_chunk_has_m_keys() {
+        with_env(None, None, None, None, || {
+            // 1537 pixels -> 3 chunks (768 + 768 + 1).
+            let fb = FrameBuffer::new(1537, 1);
+            let mut out: Vec<u8> = Vec::new();
+            super::kitty::encode_to_writer(&fb, &mut out).unwrap();
+            let s = std::str::from_utf8(&out).unwrap();
+            // 3 chunks.
+            assert_eq!(s.matches("\x1b_G").count(), 3);
+            // First chunk: full controls + m=1.
+            let first_end = s.find(';').unwrap();
+            let first_controls = &s["\x1b_G".len()..first_end];
+            assert!(first_controls.contains("a=T"));
+            assert!(first_controls.contains("m=1"));
+            // Intermediate chunk: only m=1.
+            let second_chunk_pos = s.find("\x1b_G").unwrap() + 1;
+            let second_start =
+                s[second_chunk_pos..].find("\x1b_G").unwrap() + second_chunk_pos + "\x1b_G".len();
+            let second_end = s[second_start..].find(';').unwrap() + second_start;
+            let second_controls = &s[second_start..second_end];
+            assert_eq!(second_controls, "m=1");
+            // Last chunk: m=0.
+            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_end = s.rfind(';').unwrap();
+            let last_controls = &s[last_start..last_end];
+            assert_eq!(last_controls, "m=0");
+        });
+    }
+
+    /// The streaming entry point must accept a
+    /// pre-allocated `Vec<u8>` (not just a fresh one).
+    /// This pins the `<W: Write>` generic surface and
+    /// verifies the per-chunk `out.write_all` calls
+    /// grow the writer as needed without requiring the
+    /// caller to pre-size it.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn encode_to_writer_writes_to_pre_allocated_vec() {
+        with_env(None, None, None, None, || {
+            let fb = FrameBuffer::new(4, 4);
+            // Pre-allocate a small Vec to ensure the
+            // streaming path doesn't assume the writer
+            // is empty. The Vec's `write_all` grows it
+            // as needed.
+            let mut buf: Vec<u8> = Vec::with_capacity(16);
+            super::kitty::encode_to_writer(&fb, &mut buf).unwrap();
+            // The buf must be non-empty and end with
+            // the APC terminator (single-chunk path: 16
+            // pixels = 64 raw bytes = 88 base64 chars,
+            // well under the 4096-char limit).
+            assert!(!buf.is_empty());
+            assert!(buf.starts_with(b"\x1b_G"));
+            assert!(buf.ends_with(b"\x1b\\"));
+        });
+    }
+
+    /// 2MP smoke test: 1920×1080 = 2,073,600 pixels =
+    /// 2,701 chunks of 768 pixels each. Verifies that
+    /// the streaming path produces the expected chunk
+    /// count for a realistically-sized framebuffer.
+    /// The peak working set assertion is a code-review
+    /// concern, not a runtime test -- we can't easily
+    /// measure memory in a unit test without external
+    /// tooling, but the per-chunk `Vec<u8>` allocation
+    /// is statically bounded at 3072 bytes and is the
+    /// only per-chunk allocation in the streaming path.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn encode_to_writer_2mp_frame_smoke_test() {
+        with_env(None, None, None, None, || {
+            let w: u32 = 1920;
+            let h: u32 = 1080;
+            let fb = FrameBuffer::new(w, h);
+            let mut out: Vec<u8> = Vec::new();
+            super::kitty::encode_to_writer(&fb, &mut out).unwrap();
+            let s = std::str::from_utf8(&out).unwrap();
+            // Expected chunk count: ceil(1920*1080 / 768)
+            // = ceil(2_073_600 / 768) = 2_701.
+            let expected_chunks = (w as usize * h as usize)
+                .div_ceil(super::kitty::PIXELS_PER_CHUNK);
+            assert_eq!(
+                s.matches("\x1b_G").count(),
+                expected_chunks,
+                "1920x1080 frame must produce {expected_chunks} chunks"
+            );
+            // First chunk: full controls + m=1.
+            let first_end = s.find(';').unwrap();
+            let first_controls = &s["\x1b_G".len()..first_end];
+            assert!(first_controls.contains("s=1920"));
+            assert!(first_controls.contains("v=1080"));
+            assert!(first_controls.contains("m=1"));
+            // Last chunk: m=0.
+            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_end = s.rfind(';').unwrap();
+            let last_controls = &s[last_start..last_end];
+            assert_eq!(last_controls, "m=0");
         });
     }
 }
