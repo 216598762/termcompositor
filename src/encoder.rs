@@ -218,9 +218,7 @@ pub(crate) fn detect_with_env(
     // 3. COLORTERM tiebreaker (weak signal -- see the
     //    `detect` doc comment).
     if let Some(c) = colorterm {
-        if c.eq_ignore_ascii_case("truecolor")
-            || c.eq_ignore_ascii_case("24bit")
-        {
+        if c.eq_ignore_ascii_case("truecolor") || c.eq_ignore_ascii_case("24bit") {
             return Protocol::Kitty;
         }
     }
@@ -245,10 +243,7 @@ pub trait ProtocolEncoder {
 /// `ProtocolEncoder::encode` impl so the [`Protocol::Auto`]
 /// arm can recurse cleanly via `dispatch(detect(), frame)`
 /// without duplicating the per-variant `#[cfg]` matrix.
-fn dispatch(
-    protocol: Protocol,
-    frame: &FrameBuffer,
-) -> Result<Vec<u8>, EncoderError> {
+fn dispatch(protocol: Protocol, frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
     match protocol {
         #[cfg(feature = "kitty-encoder")]
         Protocol::Kitty => kitty::encode(frame),
@@ -309,8 +304,7 @@ mod kitty {
         // contiguous byte slice. A streaming encode can be
         // added later if the per-frame allocation becomes a
         // hotspot.
-        let rgba: Vec<u8> =
-            frame.pixels().iter().flatten().copied().collect();
+        let rgba: Vec<u8> = frame.pixels().iter().flatten().copied().collect();
 
         // Build the control list. The Kitty graphics protocol
         // accepts a comma-separated list of key=value pairs
@@ -378,18 +372,13 @@ mod sixel {
         // Materialise the RGBA pixel data as a single
         // contiguous byte slice. `icy_sixel` takes owned
         // bytes.
-        let rgba: Vec<u8> =
-            frame.pixels().iter().flatten().copied().collect();
+        let rgba: Vec<u8> = frame.pixels().iter().flatten().copied().collect();
 
         // `SixelImage::from_rgba` takes `usize` width/height;
         // the `u32` values from FrameBuffer are always
         // representable in `usize` on every supported
         // platform (a widening, lossless cast).
-        let image = SixelImage::from_rgba(
-            rgba,
-            frame.width() as usize,
-            frame.height() as usize,
-        );
+        let image = SixelImage::from_rgba(rgba, frame.width() as usize, frame.height() as usize);
         let sixel_string = image.encode()?;
         Ok(sixel_string.into_bytes())
     }
@@ -399,6 +388,7 @@ mod sixel {
 mod tests {
     use super::{detect_with_env, dispatch, EncoderError, Protocol, ProtocolEncoder};
     use crate::framebuffer::FrameBuffer;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     #[test]
     fn as_str_matches_variant() {
@@ -410,9 +400,15 @@ mod tests {
     #[test]
     fn encoder_error_display_includes_context() {
         let e = EncoderError::UnsupportedProtocol("sixel");
-        assert_eq!(e.to_string(), "protocol sixel is not supported in this build");
+        assert_eq!(
+            e.to_string(),
+            "protocol sixel is not supported in this build"
+        );
 
-        let e = EncoderError::InvalidDimensions { width: 0, height: 5 };
+        let e = EncoderError::InvalidDimensions {
+            width: 0,
+            height: 5,
+        };
         assert_eq!(e.to_string(), "framebuffer has invalid dimensions: 0x5");
     }
 
@@ -427,46 +423,79 @@ mod tests {
 
     #[test]
     fn detect_with_env_picks_kitty_for_term_program_wezterm() {
-        assert_eq!(detect_with_env(None, Some("wezterm"), None), Protocol::Kitty);
-        assert_eq!(detect_with_env(None, Some("WezTerm"), None), Protocol::Kitty);
+        assert_eq!(
+            detect_with_env(None, Some("wezterm"), None),
+            Protocol::Kitty
+        );
+        assert_eq!(
+            detect_with_env(None, Some("WezTerm"), None),
+            Protocol::Kitty
+        );
     }
 
     #[test]
     fn detect_with_env_picks_kitty_for_term_program_ghostty() {
-        assert_eq!(detect_with_env(None, Some("ghostty"), None), Protocol::Kitty);
-        assert_eq!(detect_with_env(None, Some("Ghostty"), None), Protocol::Kitty);
+        assert_eq!(
+            detect_with_env(None, Some("ghostty"), None),
+            Protocol::Kitty
+        );
+        assert_eq!(
+            detect_with_env(None, Some("Ghostty"), None),
+            Protocol::Kitty
+        );
     }
 
     #[test]
     fn detect_with_env_picks_kitty_for_xterm_kitty() {
-        assert_eq!(detect_with_env(Some("xterm-kitty"), None, None), Protocol::Kitty);
+        assert_eq!(
+            detect_with_env(Some("xterm-kitty"), None, None),
+            Protocol::Kitty
+        );
     }
 
     #[test]
     fn detect_with_env_picks_kitty_for_foot_and_foot_extra() {
         assert_eq!(detect_with_env(Some("foot"), None, None), Protocol::Kitty);
-        assert_eq!(detect_with_env(Some("foot-extra"), None, None), Protocol::Kitty);
-        assert_eq!(detect_with_env(Some("foot-256color"), None, None), Protocol::Kitty);
+        assert_eq!(
+            detect_with_env(Some("foot-extra"), None, None),
+            Protocol::Kitty
+        );
+        assert_eq!(
+            detect_with_env(Some("foot-256color"), None, None),
+            Protocol::Kitty
+        );
     }
 
     #[test]
     fn detect_with_env_picks_sixel_for_tmux() {
         // tmux passthrough complicates Kitty; default to Sixel.
         assert_eq!(detect_with_env(Some("tmux"), None, None), Protocol::Sixel);
-        assert_eq!(detect_with_env(Some("tmux-256color"), None, None), Protocol::Sixel);
-        assert_eq!(detect_with_env(Some("tmux-direct"), None, None), Protocol::Sixel);
+        assert_eq!(
+            detect_with_env(Some("tmux-256color"), None, None),
+            Protocol::Sixel
+        );
+        assert_eq!(
+            detect_with_env(Some("tmux-direct"), None, None),
+            Protocol::Sixel
+        );
     }
 
     #[test]
     fn detect_with_env_picks_sixel_for_xterm_256color() {
         // Conservative: unknown XTerm-like terminal -> Sixel.
-        assert_eq!(detect_with_env(Some("xterm-256color"), None, None), Protocol::Sixel);
+        assert_eq!(
+            detect_with_env(Some("xterm-256color"), None, None),
+            Protocol::Sixel
+        );
     }
 
     #[test]
     fn detect_with_env_picks_sixel_when_neither_set() {
         assert_eq!(detect_with_env(None, None, None), Protocol::Sixel);
-        assert_eq!(detect_with_env(Some(""), Some(""), Some("")), Protocol::Sixel);
+        assert_eq!(
+            detect_with_env(Some(""), Some(""), Some("")),
+            Protocol::Sixel
+        );
     }
 
     #[test]
@@ -539,59 +568,160 @@ mod tests {
     // -- dispatch + Auto encode tests (env-var-driven) -------------------
     //
     // These tests touch `std::env::set_var`, which is
-    // process-global and racy under parallel tests. The
+    // process-global and racy under parallel tests if two of
+    // them snapshot each other's modified env vars. The
     // `cargo test` harness runs tests on multiple threads by
-    // default, so there is a theoretical race with the
-    // parallel `detect_with_env` tests above. In practice the
-    // env-var tests are short and unlikely to interleave, but
-    // be aware when reading failures here.
+    // default; without serialisation, two `with_env` calls
+    // can stomp on each other:
+    //   Test X's `EnvGuard::new("TERM")` saves the original
+    //     value.
+    //   Test Y's `EnvGuard::new("TERM")` saves X's modified
+    //     value (not the original).
+    //   X drops, restores the original -- correct.
+    //   Y drops, restores X's value -- WRONG; the env var now
+    //     leaks X's value to any subsequent parallel test.
+    //
+    // v0.7.1 closes this race by acquiring a process-global
+    // `Mutex<()>` (`env_mutex()`) before any env var is
+    // touched and holding it until the closure returns. The
+    // `EnvGuard` struct (RAII save/restore) is still in place
+    // for the panic-safety guarantee: if the test panics
+    // while holding the lock + the env guards, both the lock
+    // and the env vars are restored in `Drop` order. The
+    // `Mutex::lock` call uses `unwrap_or_else(|e|
+    // e.into_inner())` to recover from a poisoned mutex
+    // (e.g. a previous test panicked while holding the lock).
 
+    /// Process-global mutex that serialises the env-touching
+    /// test bodies. Returned by `env_mutex()` on first use.
+    /// Held by `with_env` for the duration of the closure
+    /// (set-env / run / restore-env).
+    fn env_mutex() -> &'static Mutex<()> {
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Acquires the env mutex, recovering from poisoning.
+    /// The returned guard is held until the end of the
+    /// enclosing scope (the `with_env` call site); the lock
+    /// is released when the guard is dropped.
+    fn env_lock() -> MutexGuard<'static, ()> {
+        env_mutex()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Saves the current value of one env var on construction
+    /// and restores it on `Drop`. A test can `set` a new value
+    /// (or `remove`) via the `set` method; the saved value is
+    /// always restored, even on panic.
+    struct EnvGuard {
+        name: &'static str,
+        saved: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn new(name: &'static str) -> Self {
+            let saved = std::env::var(name).ok();
+            Self { name, saved }
+        }
+        fn set(&self, value: Option<&str>) {
+            match value {
+                Some(v) => std::env::set_var(self.name, v),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.saved.as_ref() {
+                Some(v) => std::env::set_var(self.name, v),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
+    /// Panic-safe, race-free env-var fixture. Acquires the
+    /// process-global env mutex, sets TERM / TERM_PROGRAM /
+    /// COLORTERM to the supplied values (or removes them if
+    /// `None`), runs the closure, then restores all three
+    /// env vars via the `EnvGuard` `Drop` impls (in reverse
+    /// order) and releases the mutex. The mutex serialises
+    /// env-touching tests so no two `with_env` calls can
+    /// snapshot each other's modified env vars.
     fn with_env<F: FnOnce() -> R, R>(
         term: Option<&str>,
         term_program: Option<&str>,
+        colorterm: Option<&str>,
         f: F,
     ) -> R {
-        let saved_term = std::env::var("TERM").ok();
-        let saved_program = std::env::var("TERM_PROGRAM").ok();
-        match term {
-            Some(v) => std::env::set_var("TERM", v),
-            None => std::env::remove_var("TERM"),
-        }
-        match term_program {
-            Some(v) => std::env::set_var("TERM_PROGRAM", v),
-            None => std::env::remove_var("TERM_PROGRAM"),
-        }
-        let result = f();
-        match saved_term {
-            Some(v) => std::env::set_var("TERM", v),
-            None => std::env::remove_var("TERM"),
-        }
-        match saved_program {
-            Some(v) => std::env::set_var("TERM_PROGRAM", v),
-            None => std::env::remove_var("TERM_PROGRAM"),
-        }
-        result
+        let _lock = env_lock();
+        let _term = EnvGuard::new("TERM");
+        _term.set(term);
+        let _program = EnvGuard::new("TERM_PROGRAM");
+        _program.set(term_program);
+        let _colorterm = EnvGuard::new("COLORTERM");
+        _colorterm.set(colorterm);
+        f()
+        // _colorterm, _program, _term, _lock drop in reverse
+        // order, restoring all three env vars then releasing
+        // the mutex.
     }
 
+    #[cfg(feature = "kitty-encoder")]
     #[test]
-    fn dispatch_auto_recurses_through_detect() {
-        // Without touching env vars, dispatch(Auto, ...) should
-        // recurse to dispatch(detect(), ...) which returns
-        // either Kitty or Sixel. The result depends on the
-        // test-runner's env, but it must be a concrete
-        // protocol (not Auto).
-        let fb = FrameBuffer::new(2, 2);
-        // We can't assert Ok/Err generically because the
-        // relevant feature may or may not be enabled, but we
-        // can at least assert that the dispatch terminates
-        // and does not infinite-loop (the recursion is bounded
-        // by the well-defined return of `detect`).
-        let _ = dispatch(Protocol::Auto, &fb);
+    fn dispatch_auto_recurses_through_detect_resolves_to_kitty() {
+        // The Auto arm recurses via `dispatch(detect(), frame)`.
+        // Set `TERM=xterm-kitty` (a known Kitty terminfo name)
+        // so `detect()` deterministically returns Kitty, then
+        // assert the dispatch output starts with `\x1b_G`
+        // (Kitty's APC introducer). Without this, the previous
+        // v0.7.0 `dispatch_auto_recurses_through_detect` test
+        // only verified the dispatch terminates (no infinite
+        // loop), not that the recursion actually resolves
+        // correctly.
+        with_env(Some("xterm-kitty"), None, None, || {
+            let fb = FrameBuffer::new(2, 2);
+            let bytes = dispatch(Protocol::Auto, &fb).unwrap();
+            assert!(
+                bytes.starts_with(b"\x1b_G"),
+                "Auto with TERM=xterm-kitty must dispatch to Kitty, got prefix: {:?}",
+                &bytes[..bytes.len().min(8)],
+            );
+        });
     }
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn dispatch_auto_recurses_through_detect_resolves_to_sixel() {
+        // Mirror of the Kitty-side recursion test. Set
+        // `TERM=tmux-256color` (a known Sixel-fallback
+        // terminfo name) so `detect()` deterministically
+        // returns Sixel, then assert the dispatch output
+        // starts with `\x1bP` (Sixel's DCS introducer). Catches
+        // a regression that would make the recursion land in
+        // the wrong arm on the Sixel side.
+        with_env(Some("tmux-256color"), None, None, || {
+            let fb = FrameBuffer::new(2, 2);
+            let bytes = dispatch(Protocol::Auto, &fb).unwrap();
+            assert!(
+                bytes.starts_with(b"\x1bP"),
+                "Auto with TERM=tmux-256color must dispatch to Sixel, got prefix: {:?}",
+                &bytes[..bytes.len().min(8)],
+            );
+        });
+    }
+
+    // Without `kitty-encoder`, the recursion's Kitty arm
+    // returns `Err(UnsupportedProtocol("kitty"))` -- which
+    // also proves the dispatch terminates. The
+    // `dispatch_auto_with_term_tmux_delegates_to_sixel` test
+    // below covers the sixel-side recursion with a known env.
 
     #[test]
     fn dispatch_auto_with_term_program_kitty_delegates_to_kitty() {
-        with_env(None, Some("kitty"), || {
+        with_env(None, Some("kitty"), None, || {
             // When kitty-encoder is on, dispatch should
             // produce Kitty escape bytes (start with
             // `\x1b_G`).
@@ -620,7 +750,7 @@ mod tests {
 
     #[test]
     fn dispatch_auto_with_term_tmux_delegates_to_sixel() {
-        with_env(Some("tmux-256color"), None, || {
+        with_env(Some("tmux-256color"), None, None, || {
             // When sixel-encoder is on, dispatch should
             // produce Sixel escape bytes (start with
             // `\x1bP`).
@@ -764,7 +894,7 @@ mod tests {
         // would block), but we can verify the function
         // returns quickly with the env-var result and doesn't
         // error.
-        with_env(None, Some("kitty"), || {
+        with_env(None, Some("kitty"), None, || {
             let proto = super::detect_with_probe().expect("probe short-circuits");
             assert_eq!(proto, Protocol::Kitty);
         });

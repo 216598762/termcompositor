@@ -50,9 +50,7 @@ fn parse_protocol_flag() -> Option<Protocol> {
         "sixel" => Protocol::Sixel,
         "auto" => Protocol::Auto,
         other => {
-            eprintln!(
-                "warning: unknown --protocol value `{other}`; falling back to `auto`"
-            );
+            eprintln!("warning: unknown --protocol value `{other}`; falling back to `auto`");
             Protocol::Auto
         }
     })
@@ -66,7 +64,7 @@ fn parse_probe_flag() -> bool {
 fn main() {
     let size = TerminalSize::current();
     eprintln!(
-        "dashcompositor v0.7.0 -- multi-layer + auto-detect encoder: \
+        "dashcompositor v0.7.1 -- multi-layer + auto-detect encoder: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,
@@ -133,7 +131,9 @@ host terminal = {cols} cols x {rows} rows",
                 match detect_with_probe() {
                     Ok(p) => p,
                     Err(e) => {
-                        eprintln!("warning: kitty probe failed ({e}); falling back to env-var shim");
+                        eprintln!(
+                            "warning: kitty probe failed ({e}); falling back to env-var shim"
+                        );
                         detect()
                     }
                 }

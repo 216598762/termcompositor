@@ -26,7 +26,12 @@ impl Rect {
     /// Creates a new rectangle.
     #[inline]
     pub const fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Returns the exclusive right edge (`x + width`). Saturates at

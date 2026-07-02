@@ -1,3 +1,72 @@
+## 0.7.1 (2026-07-02)
+
+Patch release: hardens the `with_env` test helper with a
+panic-safe `EnvGuard` (Drop-based) that also saves and restores
+`COLORTERM` (the v0.7.0 helper only saved/restored `TERM` and
+`TERM_PROGRAM` and required manual pairing, so a panic in the
+test body could leak env modifications to other parallel tests).
+Also strengthens the auto-detect dispatch test from a
+"does-not-infinite-loop" probe to a byte-prefix assertion.
+
+### Changed
+- `src/encoder.rs` `with_env` test helper now uses a private
+  `EnvGuard` struct (a `Drop`-implementing RAII handle around
+  `std::env::var` / `std::env::set_var` / `std::env::remove_var`).
+  The guard saves the current value on construction and restores
+  it on `Drop`, so a panic in the test body still restores all
+  three env vars. The helper signature now takes three
+  `Option<&str>` arguments (TERM, TERM_PROGRAM, COLORTERM) and
+  sets / clears all three on each call.
+- `src/encoder.rs` `with_env` now also acquires a
+  process-global `Mutex<()>` (returned by `env_mutex()` via a
+  `std::sync::OnceLock`) before touching any env var, and
+  holds it until the closure returns. This serialises the
+  env-touching tests so two `with_env` calls running in
+  parallel can no longer stomp on each other's saved env
+  values (the v0.7.0 `EnvGuard`-only pattern was still racy:
+  the second `EnvGuard::new("TERM")` would snapshot the first
+  test's modified value, and the second `Drop` would restore
+  that -- not the original -- leaking the first test's value
+  to subsequent parallel tests). The 1-of-81 test failure
+  observed in a v0.7.0-flake validation run was this race.
+  The lock is acquired with `unwrap_or_else(|e|
+  e.into_inner())` to recover from a poisoned mutex (e.g. a
+  previous test panicked while holding the lock).
+- `src/encoder.rs` test `dispatch_auto_recurses_through_detect`
+  (the v0.7.0 name) was renamed and strengthened to
+  `dispatch_auto_recurses_through_detect_resolves_to_kitty` and
+  is now gated on `kitty-encoder`. The new test sets
+  `TERM=xterm-kitty` (a known Kitty terminfo name), invokes
+  `dispatch(Protocol::Auto, &fb)`, and asserts the output
+  starts with `\x1b_G` (the Kitty APC introducer) -- proving
+  the recursion actually resolves to Kitty, not just that it
+  terminates. Without this, a regression that made the
+  recursion land in the wrong arm would not have been caught
+  by the v0.7.0 test (which only verified the call returned
+  without panicking).
+- New `src/encoder.rs` test
+  `dispatch_auto_recurses_through_detect_resolves_to_sixel`
+  (gated on `sixel-encoder`) is the Sixel-side mirror of the
+  Kitty recursion test. Sets `TERM=tmux-256color` (a known
+  Sixel-fallback terminfo name) and asserts the dispatch
+  output starts with `\x1bP` (the Sixel DCS introducer).
+
+### Notes
+- `cargo build`, `cargo test`, `cargo fmt --check`, and
+  `cargo clippy --all-targets -- -D warnings` are all clean
+  for ALL four feature combinations: default,
+  `--features kitty-encoder`, `--features sixel-encoder`, and
+  `--features kitty-encoder,sixel-encoder`. `cargo build --release`
+  is clean for the default and both-features combos.
+- The `EnvGuard` pattern is the recommended one for any future
+  test helper that mutates process-global state (env vars, cwd,
+  etc.): the `Drop` impl guarantees cleanup even on panic. The
+  pattern is small enough (~25 lines including the `with_env`
+  wrapper) that it lives inline in the test module rather than
+  in a separate `pub(crate)` test-utility module.
+- No public API changes; no new dependencies; no new features.
+
+
 ## 0.7.0 (2026-07-02)
 
 Auto-detect protocol: a new `Protocol::Auto` variant that picks

@@ -334,7 +334,13 @@ impl ImageLayer {
     pub fn from_dynamic(img: image::DynamicImage, x: u32, y: u32) -> Self {
         let pixels = img.to_rgba8();
         let name = format!("Image({}x{})", pixels.width(), pixels.height());
-        Self { x, y, pixels, z: 0, name }
+        Self {
+            x,
+            y,
+            pixels,
+            z: 0,
+            name,
+        }
     }
 
     /// Decoded image width in pixels.
@@ -387,7 +393,12 @@ impl Layer for ImageLayer {
     }
 
     fn bounds(&self) -> Option<Rect> {
-        Some(Rect::new(self.x, self.y, self.pixels.width(), self.pixels.height()))
+        Some(Rect::new(
+            self.x,
+            self.y,
+            self.pixels.width(),
+            self.pixels.height(),
+        ))
     }
 
     fn render(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
@@ -399,7 +410,9 @@ impl Layer for ImageLayer {
             for sx in 0..img_w {
                 let tx = ox + sx;
                 let ty = oy + sy;
-                let Some(px) = target.get_pixel_mut(tx, ty) else { continue; };
+                let Some(px) = target.get_pixel_mut(tx, ty) else {
+                    continue;
+                };
                 let src = self.pixels.get_pixel(sx, sy).0;
                 let src_alpha = f32::from(src[3]) / 255.0 * opacity;
                 crate::framebuffer::blend_over(px, &src, src_alpha);
@@ -592,7 +605,9 @@ mod tests {
 
     #[test]
     fn rect_layer_builders() {
-        let r = RectLayer::new(0, 0, 1, 1, [0, 0, 0, 255]).with_z(7).with_name("box");
+        let r = RectLayer::new(0, 0, 1, 1, [0, 0, 0, 255])
+            .with_z(7)
+            .with_name("box");
         assert_eq!(r.z_order(), 7);
         assert_eq!(r.name(), "box");
     }
@@ -651,7 +666,9 @@ mod tests {
 
     #[test]
     fn text_layer_builders() {
-        let t = TextLayer::new(0, 0, "x", [0, 0, 0, 255]).with_z(3).with_name("label");
+        let t = TextLayer::new(0, 0, "x", [0, 0, 0, 255])
+            .with_z(3)
+            .with_name("label");
         assert_eq!(t.z_order(), 3);
         assert_eq!(t.name(), "label");
     }
@@ -820,7 +837,8 @@ mod image_layer_tests {
     #[test]
     fn image_layer_render_clips_outside_framebuffer() {
         // 2x2 image at (5, 5) is fully off the 3x3 framebuffer.
-        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255]));
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(2, 2, Rgba([1, 2, 3, 255]));
         let l = ImageLayer::from_dynamic(image::DynamicImage::ImageRgba8(img), 5, 5);
         let mut fb = FrameBuffer::new(3, 3);
         l.render(&mut fb, (0, 0), 1.0);
