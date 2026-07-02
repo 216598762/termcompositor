@@ -215,6 +215,7 @@ mod tests {
     use super::LayerStack;
     use crate::framebuffer::FrameBuffer;
     use crate::layer::SolidColor;
+    use crate::terminal::TerminalSize;
 
     #[test]
     fn push_assigns_unique_ids() {
@@ -330,7 +331,7 @@ mod tests {
 
     #[test]
     fn render_to_terminal_returns_buffer_of_given_size() {
-        let s = LayerStack::new();
+        let mut s = LayerStack::new();
         s.push(SolidColor::new(0, 0, 0, 255));
         let size = TerminalSize { rows: 5, cols: 10 };
         let fb = s.render_to_terminal(size);
