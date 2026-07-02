@@ -53,38 +53,6 @@ sequences.
                        terminal stdout
 ```
 
-## Usage (library)
-
-The `dashcompositor` library exposes a `LayerStack` that the backend
-can drive at will. Layers are added with stable `LayerId` handles,
-and each entry's per-layer state — opacity, visibility, z-override,
-name — can be tweaked at any time:
-
-```rust
-use dashcompositor::{FrameBuffer, LayerStack, SolidColor};
-
-let mut stack = LayerStack::new();
-let bg = stack.push(SolidColor::new(0, 0, 0, 255).with_name("bg"));
-let fg = stack.push(SolidColor::new(255, 0, 0, 255).with_z(10));
-
-// Control at will.
-stack.get_mut(fg).unwrap().set_opacity(0.5);
-stack.get_mut(bg).unwrap().set_visible(false);
-
-// Render.
-let mut fb = FrameBuffer::new(80, 24);
-stack.render(&mut fb);
-
-// Remove and re-add.
-let _ = stack.remove(bg);
-let accent = stack.push(SolidColor::new(0, 255, 0, 255));
-stack.get_mut(accent).unwrap().set_z_override(100);
-```
-
-A custom `Compositor` can be plugged in via `LayerStack::render_with`;
-the default `CpuCompositor` is a zero-dependency reference
-implementation.
-
 ## Contributing
 
 Read [`AGENTS.md`](./AGENTS.md) first. Key rules:
@@ -97,3 +65,81 @@ Read [`AGENTS.md`](./AGENTS.md) first. Key rules:
 ## License
 
 Licensed under the **MIT License** — see [`LICENSE`](./LICENSE).
+## Usage (library)
+
+The `dashcompositor` library exposes a `LayerStack` that the backend
+can drive at will. Layers are added with stable `LayerId` handles,
+and each entry's per-layer state -- opacity, visibility, z-override,
+name -- can be tweaked at any time. Four built-in `Layer` types
+are provided:
+
+| Type        | Has position? | Notes                                  |
+| ----------- | :-----------: | -------------------------------------- |
+| `SolidColor`| no (fills)    | Single RGBA colour, fills whole target |
+| `RectLayer` | yes           | RGBA solid at `(x, y)` of `width x height` |
+| `TextLayer` | yes           | Placeholder; renders a coloured block, exposes `render_glyph()` for a future font rasterizer |
+| `ImageLayer`| yes (optional) | Decodes PNG / JPEG via the `image` crate (gated on the `image-decoder` feature) |
+
+```rust
+use dashcompositor::{
+    FrameBuffer, LayerStack, RectLayer, SolidColor, TerminalSize, TextLayer,
+};
+
+let mut stack = LayerStack::new();
+
+// Full-frame background.
+let bg = stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
+
+// Positioned rectangle.
+let rect = stack.push(
+    RectLayer::new(20, 6, 40, 12, [0, 200, 0, 200])
+        .with_z(10)
+        .with_name("centered-rect"),
+);
+
+// Text placeholder (will be swapped for a real glyph rasterizer
+// later; for now it draws a colored block the size of the text).
+let label = stack.push(
+    TextLayer::new(2, 1, "dashcompositor", [255, 255, 255, 255])
+        .with_z(20)
+        .with_name("title"),
+);
+
+// Render into a framebuffer auto-sized to the host terminal.
+let (fb, size) = stack.render_to_current_terminal();
+assert_eq!(size.cols as u32, fb.width());
+assert_eq!(size.rows as u32, fb.height());
+
+// Control at will.
+stack.get_mut(rect).unwrap().set_opacity(0.5);
+stack.get_mut(label).unwrap().set_visible(false);
+```
+
+### Optional: raster image layer
+
+`ImageLayer` decodes PNG and JPEG into a layer via the `image`
+crate. Enable it with the `image-decoder` feature in your
+`Cargo.toml`:
+
+```toml
+dashcompositor = { version = "0.4", features = ["image-decoder"] }
+```
+
+then:
+
+```rust
+use dashcompositor::ImageLayer;
+let img = ImageLayer::from_path("logo.png", 4, 2)?;
+let id = stack.push(img);
+```
+
+### Optional feature flags
+
+| Feature          | Default | Pulls in          | Enables                        |
+| ---------------- | :-----: | ----------------- | ------------------------------ |
+| `image-decoder`  |   off   | `image = "0.25"`  | `ImageLayer` (PNG + JPEG)      |
+
+A custom `Compositor` can be plugged in via `LayerStack::render_with`;
+the default `CpuCompositor` is a zero-dependency reference
+implementation.
+

@@ -1,3 +1,60 @@
+## 0.4.0 (2026-07-02)
+
+Multi-layer compositor: three new `Layer` types, an optional
+image-decoder feature, a `Rect` geometry primitive, and a
+breaking extension to the `Layer` trait (additive render
+offset + `bounds()`).
+
+### Added
+- `src/geometry.rs` -- new `Rect { x, y, width, height }`
+  geometry primitive with `is_empty`, `contains`, and
+  `intersects` helpers. Re-exported as `dashcompositor::Rect`.
+- `RectLayer` (always available): RGBA solid at `(x, y)`
+  with `width x height`. `bounds()` reports the rect; render
+  writes are clipped to the framebuffer.
+- `TextLayer` (always available): UTF-8 text + position +
+  colour placeholder. Exposes `render_glyph() -> &str` (a
+  placeholder for a future font-backed glyph rasterizer)
+  and `text_width()` (one cell per Unicode scalar value).
+  Renders as a solid block the size of the text's bounding
+  box so layout and z-order are visually verifiable.
+- `ImageLayer` (gated on the new `image-decoder` Cargo
+  feature): decodes PNG and JPEG via the `image` crate
+  (version 0.25, MIT, `default-features = false`, only
+  `png` + `jpeg` decoders enabled per AGENTS.md section 3).
+  Constructors: `ImageLayer::from_path` and
+  `ImageLayer::from_dynamic`.
+- `FrameBuffer::get_pixel` and `FrameBuffer::get_pixel_mut`:
+  bounds-checked per-pixel accessors that return `Option`,
+  giving layers a single, consistent way to clip writes.
+
+### Changed
+- `Layer` trait extended (breaking for downstream implementors):
+  - New `bounds() -> Option<Rect>` with a default impl
+    returning `None` (full-frame layers like `SolidColor`).
+  - `render` signature gains an additive `offset: (u32, u32)`
+    translation parameter; layers that have no position
+    (e.g. `SolidColor`) ignore it.
+- `Cargo.toml`: added the `image` crate as an optional
+  dependency and the `image-decoder` Cargo feature
+  (`default = []`; `image-decoder = ["dep:image"]`). The
+  default build remains dependency-light (only
+  `terminal_size`).
+- `main.rs` demo now drives a `SolidColor` background, a
+  positioned `RectLayer`, and a `TextLayer` placeholder,
+  reports each layer's bounds, and exercises the full
+  add / control / remove / re-add / re-render flow.
+
+### Notes
+- `cargo build`, `cargo test` (58 unit tests with default features, 64 with `--features image-decoder`; +1 doc test),
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  and `cargo build --release` all remain clean -- both with
+  default features and with `--features image-decoder`.
+- The `image` crate evaluation per AGENTS.md section 3: BSD
+  3-Clause / Apache-2.0 / MIT, ~70M downloads, the de-facto
+  Rust image-decoding library. Adopted as an optional dep
+  with `default-features = false` + `png` + `jpeg` only.
+
 # Changelog
 
 All notable changes to `dashcompositor` are recorded here. The format

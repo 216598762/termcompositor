@@ -33,7 +33,7 @@ impl Compositor for CpuCompositor {
             .iter_sorted()
             .filter(|e| e.is_visible() && e.opacity() > 0.0)
         {
-            entry.layer().render(target, entry.opacity());
+            entry.layer().render(target, (0, 0), entry.opacity());
         }
     }
 }

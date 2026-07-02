@@ -1,6 +1,6 @@
 [package]
 name = "dashcompositor"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Layer-based graphics compositor for the terminal (Kitty graphics protocol / Sixel)"
 license = "MIT"
@@ -13,8 +13,20 @@ authors = ["216598762"]
 # publishing to crates.io once the library surface stabilises.
 publish = false
 
+[features]
+# The `image-decoder` feature pulls in the `image` crate so the
+# `dashcompositor::ImageLayer` type is available. Default OFF so a
+# default build stays dependency-light (only `terminal_size`).
+default = []
+image-decoder = ["dep:image"]
+
 [dependencies]
 terminal_size = "0.3"
+# `image` is adopted as an optional dependency. `default-features =
+# false` keeps transitive deps minimal; only the PNG and JPEG
+# decoders are enabled (see AGENTS.md §3: evaluate each crate before
+# adopting). Bump to a newer minor as needed.
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
 [lib]
 name = "dashcompositor"
@@ -24,20 +36,16 @@ path = "src/lib.rs"
 name = "dashcompositor"
 path = "src/main.rs"
 
-# Candidate features below are commented out on purpose; per AGENTS.md §3
-# each crate must be evaluated on crates.io (maintenance, license, fit)
-# before being adopted. Uncomment as features once chosen.
+# Other candidate crates (tiny-skia, wgpu, etc.) are still under
+# evaluation per AGENTS.md §3 and remain commented out.
 #
 # [dependencies]
 # tiny-skia = { version = "0.11", optional = true }
 # wgpu      = { version = "23",  optional = true }
-# image     = { version = "0.25", optional = true }
 #
 # [features]
-# default         = []
 # cpu-compositor  = ["dep:tiny-skia"]
 # gpu-compositor  = ["dep:wgpu"]
-# image-decoder   = ["dep:image"]
 
 [profile.release]
 opt-level = 3

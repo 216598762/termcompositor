@@ -1,7 +1,7 @@
 //! Framebuffer — flat RGBA pixel buffer representing one composited frame.
 //!
-//! Stored row-major: index `(y * width + x) * 4` gives the start of the
-//! RGBA tuple for pixel `(x, y)`. Each channel is `0..=255`.
+//! Stored row-major: index `(y * width + x)` gives the pixel for
+//! `(x, y)`. Each pixel is `[R, G, B, A]` with channels in `0..=255`.
 
 /// A flat RGBA pixel buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,8 +14,8 @@ pub struct FrameBuffer {
 
 impl FrameBuffer {
     /// Creates a new fully transparent framebuffer of the given
-    /// dimensions. Uses saturating multiplication to avoid overflow on
-    /// absurd input; the resulting buffer is clamped to
+    /// dimensions. Uses saturating multiplication to avoid overflow
+    /// on absurd input; the resulting buffer is clamped to
     /// `width.saturating_mul(height)` entries.
     pub fn new(width: u32, height: u32) -> Self {
         let count = (width as usize).saturating_mul(height as usize);
@@ -52,18 +52,41 @@ impl FrameBuffer {
             *px = [0, 0, 0, 0];
         }
     }
+
+    /// Returns a shared reference to the pixel at `(x, y)`, or
+    /// `None` if `(x, y)` is outside the framebuffer. Free
+    /// bounds-checking for layers that may draw partially
+    /// off-screen.
+    pub fn get_pixel(&self, x: u32, y: u32) -> Option<&[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let idx = (y as usize) * (self.width as usize) + (x as usize);
+        self.pixels.get(idx)
+    }
+
+    /// Returns a mutable reference to the pixel at `(x, y)`, or
+    /// `None` if `(x, y)` is outside the framebuffer.
+    pub fn get_pixel_mut(&mut self, x: u32, y: u32) -> Option<&mut [u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let idx = (y as usize) * (self.width as usize) + (x as usize);
+        self.pixels.get_mut(idx)
+    }
 }
 
-/// Blends `src` (straight RGBA) over `dst` (in place) using the given
-/// `src_alpha` (in `0.0..=1.0`).
+/// Blends `src` (straight RGBA) over `dst` (in place) using the
+/// given `src_alpha` (in `0.0..=1.0`).
 ///
-/// Uses standard over-compositing math in straight (non-premultiplied)
-/// alpha. Both inputs and the destination are non-premultiplied; the
-/// math handles the premultiplied-equivalent operations internally.
+/// Uses standard over-compositing math in straight
+/// (non-premultiplied) alpha. Both inputs and the destination are
+/// non-premultiplied; the math handles the premultiplied-equivalent
+/// operations internally.
 ///
-/// `src_alpha` is clamped to `0.0..=1.0`. A `src_alpha` of `0.0` is
-/// a no-op; a `src_alpha` of `1.0` writes the source colour directly
-/// (overwriting the destination's RGB and alpha).
+/// `src_alpha` is clamped to `0.0..=1.0`. A `src_alpha` of `0.0`
+/// is a no-op; a `src_alpha` of `1.0` writes the source colour
+/// directly (overwriting the destination's RGB and alpha).
 pub fn blend_over(dst: &mut [u8; 4], src: &[u8; 4], src_alpha: f32) {
     let a = src_alpha.clamp(0.0, 1.0);
     if a == 0.0 {
@@ -120,13 +143,34 @@ mod tests {
 
     #[test]
     fn blend_translucent_preserves_alpha() {
-        // 50% src over 50% dst: out_a = 0.5 + 0.5*0.5 = 0.75 -> 191.
-        // Note: blend_over uses the `src_alpha` parameter as the effective
-        // source alpha (the src[3] byte is ignored); SolidColor::render
-        // is the public entry point that derives `src_alpha` from the
-        // source's a channel.
         let mut dst = [0, 0, 0, 128];
         blend_over(&mut dst, &[255, 0, 0, 128], 0.5);
         assert!((dst[3] as i32 - 191).abs() <= 1, "alpha = {}", dst[3]);
+    }
+
+    #[test]
+    fn get_pixel_in_bounds_round_trip() {
+        let mut fb = FrameBuffer::new(3, 2);
+        if let Some(px) = fb.get_pixel_mut(2, 1) {
+            *px = [1, 2, 3, 4];
+        }
+        assert_eq!(fb.get_pixel(2, 1), Some(&[1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn get_pixel_out_of_bounds_returns_none() {
+        let fb = FrameBuffer::new(2, 2);
+        assert_eq!(fb.get_pixel(2, 0), None);
+        assert_eq!(fb.get_pixel(0, 2), None);
+        assert_eq!(fb.get_pixel(u32::MAX, 0), None);
+    }
+
+    #[test]
+    fn get_pixel_mut_writes_back() {
+        let mut fb = FrameBuffer::new(2, 2);
+        if let Some(px) = fb.get_pixel_mut(1, 1) {
+            *px = [9, 8, 7, 6];
+        }
+        assert_eq!(fb.get_pixel(1, 1), Some(&[9, 8, 7, 6]));
     }
 }
