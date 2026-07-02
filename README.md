@@ -64,4 +64,4 @@ Read [`AGENTS.md`](./AGENTS.md) first. Key rules:
 
 ## License
 
-To be decided.
+Licensed under the **MIT License** — see [`LICENSE`](./LICENSE).

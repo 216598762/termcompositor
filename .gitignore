@@ -33,3 +33,8 @@ venv/
 coverage/
 .cache/
 .tmp/
+
+# Rust
+target/
+**/*.rs.bk
+.cargo/
