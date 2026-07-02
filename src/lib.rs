@@ -23,6 +23,16 @@ pub use encoder::wrap_for_tmux_to_writer;
 pub use encoder::PassthroughWriter;
 #[cfg(feature = "kitty-encoder")]
 pub use encoder::encode_passthrough_to_writer;
+// NOTE: the v0.8.4 `sixel::encode_to_writer` is re-exported
+// at the `encoder` module level (see
+// `dashcompositor::encoder::encode_to_writer`) but NOT at
+// the crate root, to mirror the kitty `encode_to_writer`
+// access pattern (`dashcompositor::encoder::kitty::encode_to_writer`).
+// Neither streaming entry point is at the crate root: a
+// single crate-root `encode_to_writer` name would be
+// ambiguous in a build with both `kitty-encoder` and
+// `sixel-encoder` enabled (which one wins?), and the
+// module-path access is more explicit anyway.
 pub use encoder::{detect, EncoderError, Protocol, ProtocolEncoder};
 pub use framebuffer::{blend_over, FrameBuffer};
 pub use geometry::Rect;

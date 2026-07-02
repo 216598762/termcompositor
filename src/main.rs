@@ -118,7 +118,7 @@ impl Drop for DashPassthroughGuard {
 fn main() {
     let size = TerminalSize::current();
     eprintln!(
-        "dashcompositor v0.8.3 -- multi-layer + auto-detect encoder: \
+        "dashcompositor v0.8.4 -- multi-layer + auto-detect encoder: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,

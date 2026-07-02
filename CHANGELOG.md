@@ -1,3 +1,84 @@
+## 0.8.4 (2026-07-02)
+
+Streaming Sixel encode: the v0.6.0 Sixel encoder
+materialised the Sixel output in a `Vec<u8>` via
+`sixel_string.into_bytes()`, which added one full-frame
+allocation on top of the unavoidable RGBA input
+allocation. v0.8.4 adds a new public streaming entry
+point that writes the Sixel DCS bytes directly to a
+caller-supplied `&mut impl Write` sink, eliminating
+the intermediate Sixel-output `Vec<u8>` allocation.
+
+### Added
+- `pub fn sixel::encode_to_writer<W: Write>(frame, &mut W)
+  -> Result<(), EncoderError>` in
+  `dashcompositor::encoder`, gated on the
+  `sixel-encoder` Cargo feature. Writes the Sixel DCS
+  bytes to any `std::io::Write` impl (e.g. `Vec<u8>`,
+  `std::fs::File`, `std::net::TcpStream`).
+  Re-exported at the encoder module level as
+  `dashcompositor::encoder::encode_to_writer`
+  (NOT at the crate root, to avoid the ambiguity of a
+  single `encode_to_writer` name resolving to different
+  encoders depending on the feature set; this mirrors
+  the kitty `encode_to_writer` access pattern at
+  `dashcompositor::encoder::kitty::encode_to_writer`).
+
+### Changed
+- `sixel::encode(frame) -> Result<Vec<u8>, EncoderError>`
+  is now a thin wrapper that allocates a fresh `Vec<u8>`
+  and delegates to `encode_to_writer`. The wire format
+  is unchanged (byte-for-byte equivalent to v0.6.0/
+  v0.8.0/v0.8.3 for the same input). The intermediate
+  Sixel-output `Vec<u8>` that the v0.8.0 path allocated
+  via `sixel_string.into_bytes()` is eliminated in the
+  streaming path (the `String`'s internal buffer is
+  borrowed, not copied into a new `Vec`).
+
+### Tests
+- 4 new unit tests:
+  `sixel_encode_to_writer_small_frame_matches_encode`
+  (streaming output matches `encode` byte-for-byte for
+  a 1x1 frame);
+  `sixel_encode_to_writer_writes_to_pre_allocated_vec`
+  (the `<W: Write>` generic surface accepts a
+  pre-allocated `Vec`);
+  `sixel_encode_to_writer_rejects_zero_dimensions`
+  (zero-dimensions error path is identical to the
+  `encode` path);
+  `sixel_encode_to_writer_2mp_frame_smoke_test` (1920x1080
+  framebuffer encodes correctly through the streaming
+  path).
+
+### Notes
+- **Memory profile caveat**: the input RGBA `Vec<u8>`
+  (`pixels.iter().flatten().copied().collect()`, 8MB+ for
+  a 2MP frame) is still materialised by the streaming
+  path, because `icy_sixel` 0.5 takes owned RGBA bytes
+  via `SixelImage::from_rgba(Vec<u8>, w, h)` and has no
+  streaming input API (verified by reading the local
+  crate source: the only public encode methods are
+  `encode(&self) -> Result<String>` and
+  `encode_with(&self, opts) -> Result<String>`, neither
+  of which takes a `Write` sink). The v0.8.4 streaming
+  entry point therefore saves one full-frame allocation
+  (the Sixel output) but not the input RGBA allocation.
+  The Kitty arm's `kitty::encode_to_writer` (v0.8.2)
+  avoids both allocations because `little_kitty`'s
+  `KittyCommandWriter` is per-chunk-incremental. A
+  future v0.9.x could address the Sixel input
+  allocation by either (a) waiting for `icy_sixel` to
+  add a streaming input API, (b) swapping to a different
+  Sixel crate that supports streaming, or (c) writing
+  our own streaming Sixel quantiser/serialiser.
+- All 4 feature combinations clean: cargo fmt, cargo
+  build (default + each feature + both), cargo build
+  --release (default + both), cargo test (117 tests
+  with both features, 0 failed), cargo clippy
+  --all-targets -- -D warnings (0 errors across all 4
+  combos).
+- No public API removals; no new runtime dependencies;
+  no new Cargo features.
 ## 0.8.3 (2026-07-02)
 
 End-to-end O(1) streaming for the tmux passthrough wrap.

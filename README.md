@@ -202,6 +202,43 @@ thin wrapper that delegates to `wrap_for_tmux_to_writer`
 writing to a fresh `Vec<u8>`. Wire format is
 byte-for-byte equivalent to v0.8.0/v0.8.2 for the same
 input.
+### Streaming Sixel encode (v0.8.4)
+
+The v0.6.0 Sixel encoder materialised the Sixel output
+in a `Vec<u8>` via `sixel_string.into_bytes()`, which
+added one full-frame allocation on top of the
+unavoidable RGBA input allocation. v0.8.4 adds a new
+streaming entry point for callers that need to write
+Sixel output directly to a file, socket, or terminal
+handle without that intermediate `Vec<u8>`:
+
+```rust,ignore
+use dashcompositor::encoder::sixel;
+use dashcompositor::framebuffer::FrameBuffer;
+use std::io::BufWriter;
+
+let fb = FrameBuffer::new(1920, 1080);
+let stdout = std::io::stdout();
+let mut writer = BufWriter::new(stdout.lock());
+sixel::encode_to_writer(&fb, &mut writer)?;
+```
+
+The streaming entry point writes the Sixel DCS bytes
+directly to the caller's `&mut impl Write` sink. The
+input RGBA `Vec<u8>` is still materialised
+(unfortunately: `icy_sixel` 0.5 takes owned RGBA bytes
+and has no streaming input API), but the Sixel-output
+`Vec<u8>` is eliminated -- we write the
+`SixelImage::encode()` `String`'s internal buffer
+straight to the writer via `write_all` (borrowed, not
+copied).
+
+The existing `sixel::encode(frame) -> Vec<u8>` entry
+point is preserved unchanged and is now implemented as
+a thin wrapper that delegates to the streaming path
+internally. Wire format is byte-for-byte equivalent to
+v0.6.0/v0.8.0/v0.8.3 for the same input.
+
 ### Streaming encode (v0.8.2)
 
 The v0.8.1 chunked encoder still materialised the

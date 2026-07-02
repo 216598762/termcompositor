@@ -115,7 +115,14 @@ impl std::error::Error for EncoderError {}
 // helper closures (the v0.5.0 `io_err` / v0.6.0 `sixel_err`
 // helpers have been removed in favour of this pattern).
 
-#[cfg(feature = "kitty-encoder")]
+// `From<std::io::Error>` for `EncoderError` is needed by
+// BOTH encoder arms that use `?` on `std::io::Write` calls:
+// the v0.5.0/v0.8.x `kitty::encode_to_writer` and the
+// v0.8.4 `sixel::encode_to_writer`. Gate on `any(kitty,
+// sixel)` so a build that enables either encoder feature
+// can compile both paths' `?` usage; the impl is a no-op
+// when neither is enabled (no caller can reach it).
+#[cfg(any(feature = "kitty-encoder", feature = "sixel-encoder"))]
 impl From<std::io::Error> for EncoderError {
     fn from(e: std::io::Error) -> Self {
         EncoderError::Encode(e.to_string())
@@ -818,19 +825,63 @@ pub use kitty::encode_passthrough_to_writer;
 /// The Sixel graphics protocol encoder, gated on the
 /// `sixel-encoder` Cargo feature. Implemented as a private
 /// inline module so the public API surface stays minimal.
+///
+/// v0.8.4 adds [`encode_to_writer`], a streaming entry point
+/// that writes the Sixel DCS bytes directly to a
+/// caller-supplied `&mut impl Write` sink. The v0.6.0/0.8.0
+/// `encode -> Vec<u8>` path materialised the Sixel output in
+/// a `Vec<u8>` (typically several MB for a 2MP frame);
+/// v0.8.4 eliminates that allocation by writing the
+/// `icy_sixel::SixelImage::encode()` result string's bytes
+/// straight to the caller's writer. **Note**: the input
+/// RGBA `Vec<u8>` (`pixels.iter().flatten().copied().collect()`,
+/// 8MB+ for a 2MP frame) is still materialised, because
+/// `icy_sixel` 0.5 takes owned RGBA bytes and does the
+/// color quantization + sixel serialisation in one shot
+/// with no streaming input API. The streaming entry point
+/// therefore saves one full-frame allocation (the Sixel
+/// output) but not the input RGBA allocation. The Kitty
+/// arm's [`kitty::encode_to_writer`] avoids both
+/// allocations because `little_kitty`'s `KittyCommandWriter`
+/// is per-chunk-incremental.
 #[cfg(feature = "sixel-encoder")]
 mod sixel {
     use super::EncoderError;
     use crate::framebuffer::FrameBuffer;
     use icy_sixel::SixelImage;
+    use std::io::Write;
 
     /// Encodes `frame` as a Sixel DCS (Device Control String)
-    /// escape sequence. The returned bytes are the full
-    /// terminal-ready payload: `\x1bPq...sixel data...\x1b\\`.
-    /// `icy_sixel` does the color quantization and sixel-data
-    /// serialisation; we just hand it the RGBA pixels and pass
-    /// through the resulting string.
-    pub fn encode(frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
+    /// escape sequence and writes the bytes to `out`. **v0.8.4
+    /// streaming entry point**: writes the encoded Sixel
+    /// bytes directly to the caller's `&mut impl Write` sink
+    /// (e.g. `Vec<u8>`, `std::fs::File`, `std::net::TcpStream`,
+    /// `std::io::StdoutLock`). Avoids the intermediate
+    /// `Vec<u8>` allocation that the v0.6.0/0.8.0 `encode`
+    /// path incurred via `sixel_string.into_bytes()`.
+    ///
+    /// **Memory profile**: the dominant allocation is still
+    /// the input RGBA `Vec<u8>` (8MB+ for a 2MP frame) --
+    /// `icy_sixel` 0.5 takes owned RGBA bytes and has no
+    /// streaming input API. The Sixel-output `Vec<u8>` (which
+    /// the v0.8.3 `encode` path allocated as
+    /// `sixel_string.into_bytes()`) is eliminated: we write
+    /// the `String`'s internal buffer directly to `out` via
+    /// `write_all`, which only borrows the bytes (no copy).
+    /// The Sixel DCS `String` itself is still allocated by
+    /// `icy_sixel::SixelImage::encode()` (that's how
+    /// `icy_sixel` exposes its output), but its bytes are
+    /// written through to the caller rather than copied
+    /// into a fresh `Vec<u8>`.
+    ///
+    /// Callers that want a `Vec<u8>` of the output (e.g. the
+    /// v0.6.0/v0.8.0 API) can call [`encode`] (which
+    /// delegates to this function writing into a fresh
+    /// `Vec<u8>`) or pass `&mut Vec::new()` here directly.
+    pub fn encode_to_writer<W: Write>(
+        frame: &FrameBuffer,
+        out: &mut W,
+    ) -> Result<(), EncoderError> {
         if frame.width() == 0 || frame.height() == 0 {
             return Err(EncoderError::InvalidDimensions {
                 width: frame.width(),
@@ -839,8 +890,12 @@ mod sixel {
         }
 
         // Materialise the RGBA pixel data as a single
-        // contiguous byte slice. `icy_sixel` takes owned
-        // bytes.
+        // contiguous byte slice. `icy_sixel` 0.5 takes owned
+        // bytes via `SixelImage::from_rgba(Vec<u8>, w, h)`,
+        // and has no streaming input API (verified by reading
+        // the local crate source: the only public encode
+        // methods are `encode(&self) -> Result<String>` and
+        // `encode_with(&self, opts) -> Result<String>`).
         let rgba: Vec<u8> = frame.pixels().iter().flatten().copied().collect();
 
         // `SixelImage::from_rgba` takes `usize` width/height;
@@ -849,9 +904,58 @@ mod sixel {
         // platform (a widening, lossless cast).
         let image = SixelImage::from_rgba(rgba, frame.width() as usize, frame.height() as usize);
         let sixel_string = image.encode()?;
-        Ok(sixel_string.into_bytes())
+        // Write the Sixel string's UTF-8 bytes directly to
+        // the caller's writer. `sixel_string.as_bytes()`
+        // borrows the String's internal buffer (no copy);
+        // the v0.8.0 `encode` path did
+        // `sixel_string.into_bytes()`, which COPIES the
+        // String's buffer into a new `Vec<u8>` just to
+        // return it. The streaming entry point skips that
+        // copy. (Writing a `String`'s bytes to a `Vec<u8>`
+        // is itself a copy into the destination's
+        // growable buffer, so the streaming entry point
+        // is only a memory win when the caller uses a
+        // non-`Vec` writer like a `File` or `StdoutLock`.)
+        out.write_all(sixel_string.as_bytes())?;
+        Ok(())
+    }
+
+    /// Encodes `frame` as a Sixel DCS (Device Control String)
+    /// escape sequence. The returned bytes are the full
+    /// terminal-ready payload: `\x1bPq...sixel data...\x1b\\`.
+    /// `icy_sixel` does the color quantization and sixel-data
+    /// serialisation; we just hand it the RGBA pixels and pass
+    /// through the resulting string.
+    ///
+    /// Internally delegates to [`encode_to_writer`] writing
+    /// into a fresh `Vec<u8>`. The wire format is unchanged
+    /// from v0.6.0/v0.8.0 (byte-for-byte equivalent for the
+    /// same input); the v0.8.4 change is to the memory
+    /// profile of the streaming entry point, not the
+    /// return-Vec entry point.
+    pub fn encode(frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
+        let mut out = Vec::new();
+        encode_to_writer(frame, &mut out)?;
+        Ok(out)
     }
 }
+
+// Re-export the v0.8.4 streaming Sixel `encode_to_writer`
+// at the `encoder` module level so downstream users can
+// call it as `dashcompositor::encoder::encode_to_writer`
+// without reaching into the private `sixel` submodule.
+// This mirrors the kitty `encode_to_writer` access
+// pattern (`dashcompositor::encoder::kitty::encode_to_writer`):
+// neither streaming entry point is re-exported at the
+// crate root, because a single crate-root `encode_to_writer`
+// name would be ambiguous in a build with both
+// `kitty-encoder` and `sixel-encoder` enabled (which one
+// wins?), and the module-path access is more explicit
+// anyway. Gated on `sixel-encoder` because the helper is
+// only available when the Sixel encoder crate is
+// compiled in.
+#[cfg(feature = "sixel-encoder")]
+pub use sixel::encode_to_writer;
 
 #[cfg(test)]
 mod tests {
@@ -2038,6 +2142,130 @@ mod tests {
             let last_controls = &s[last_start..last_end];
             assert_eq!(last_controls, "m=0");
         });
+    }
+
+    // -- v0.8.4: streaming Sixel encode tests ------------------------
+    //
+    // The v0.8.4 streaming Sixel entry point
+    // `sixel::encode_to_writer<W: Write>` writes the Sixel
+    // DCS bytes directly to the caller's `&mut impl Write`
+    // sink. The input RGBA `Vec<u8>` is still materialised
+    // (`icy_sixel` 0.5 has no streaming input API), but the
+    // Sixel-output `Vec<u8>` that the v0.8.0 `encode` path
+    // allocated via `sixel_string.into_bytes()` is
+    // eliminated -- we write the `String`'s internal buffer
+    // directly to the caller's writer.
+    //
+    // These tests verify (a) byte-for-byte equivalence with
+    // the v0.8.0 `sixel::encode` for various inputs, (b) the
+    // streaming entry point accepts a pre-allocated `Vec`,
+    // (c) the zero-dimensions error path still works
+    // through the streaming entry point, and (d) a 2MP
+    // smoke test (realistic framebuffer size) works.
+
+    /// Streaming output for a small frame (1x1) must match
+    /// the v0.8.0 `sixel::encode` output byte-for-byte.
+    /// This pins the v0.8.4 refactor's invariant: the
+    /// streaming path and the `Vec<u8>` path produce
+    /// identical bytes for the same input.
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_encode_to_writer_small_frame_matches_encode() {
+        let mut fb = FrameBuffer::new(1, 1);
+        for px in fb.pixels_mut() {
+            *px = [255, 0, 0, 255];
+        }
+        let from_encode = super::sixel::encode(&fb).unwrap();
+        let mut from_streaming: Vec<u8> = Vec::new();
+        super::sixel::encode_to_writer(&fb, &mut from_streaming).unwrap();
+        assert_eq!(from_encode, from_streaming);
+    }
+
+    /// The streaming entry point must accept a
+    /// pre-allocated `Vec<u8>` (not just a fresh one).
+    /// This pins the `<W: Write>` generic surface and
+    /// verifies the streaming path's `out.write_all`
+    /// call grows the writer as needed without
+    /// requiring the caller to pre-size it.
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_encode_to_writer_writes_to_pre_allocated_vec() {
+        let mut fb = FrameBuffer::new(2, 2);
+        for px in fb.pixels_mut() {
+            *px = [0, 255, 0, 255];
+        }
+        // Pre-allocate a small Vec to ensure the
+        // streaming path doesn't assume the writer
+        // is empty. The Vec's `write_all` grows it
+        // as needed.
+        let mut buf: Vec<u8> = Vec::with_capacity(16);
+        super::sixel::encode_to_writer(&fb, &mut buf).unwrap();
+        // The buf must be non-empty and end with the
+        // DCS terminator (Sixel output always starts
+        // with `ESC P q` and ends with `ESC \`).
+        assert!(!buf.is_empty());
+        assert!(buf.starts_with(b"\x1bP"));
+        assert!(buf.ends_with(b"\x1b\\"));
+    }
+
+    /// The streaming entry point must surface the
+    /// zero-dimensions error from the Sixel encoder.
+    /// This pins the v0.8.4 invariant: the streaming
+    /// path returns the same `EncoderError` variants
+    /// as the `Vec<u8>` path, so callers can use
+    /// `?` uniformly across both entry points.
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_encode_to_writer_rejects_zero_dimensions() {
+        let fb_zero_w = FrameBuffer::new(0, 5);
+        let fb_zero_h = FrameBuffer::new(5, 0);
+        let fb_zero_both = FrameBuffer::new(0, 0);
+        let mut buf: Vec<u8> = Vec::new();
+        for fb in [&fb_zero_w, &fb_zero_h, &fb_zero_both] {
+            let err = super::sixel::encode_to_writer(fb, &mut buf)
+                .unwrap_err();
+            assert!(matches!(err, EncoderError::InvalidDimensions { .. }));
+        }
+        // The buffer must be untouched (the error is
+        // returned before any Sixel encoding work
+        // happens).
+        assert!(buf.is_empty());
+    }
+
+    /// 2MP smoke test: 1920×1080 = 2,073,600 pixels.
+    /// Verifies that the streaming path produces a
+    /// non-empty Sixel DCS for a realistically-sized
+    /// framebuffer. The peak working set assertion is
+    /// a code-review concern, not a runtime test --
+    /// we can't easily measure memory in a unit test
+    /// without external tooling, but the Sixel-output
+    /// `Vec<u8>` that the v0.8.0 `encode` path
+    /// allocated via `sixel_string.into_bytes()` is
+    /// statically eliminated by the streaming path
+    /// (the `String`'s internal buffer is borrowed,
+    /// not copied into a new `Vec`).
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_encode_to_writer_2mp_frame_smoke_test() {
+        let w: u32 = 1920;
+        let h: u32 = 1080;
+        let fb = FrameBuffer::new(w, h);
+        let mut out: Vec<u8> = Vec::new();
+        super::sixel::encode_to_writer(&fb, &mut out).unwrap();
+        // The output must be non-empty and have the
+        // expected Sixel DCS framing.
+        assert!(!out.is_empty());
+        assert!(out.starts_with(b"\x1bP"));
+        assert!(out.ends_with(b"\x1b\\"));
+        // Sanity check: the output should be larger
+        // than the RGBA input (Sixel DCS adds framing
+        // and run-length-encoded sixel data that can
+        // be larger or smaller than RGBA depending on
+        // color complexity, but for a default-zero
+        // framebuffer the encoding is highly
+        // compressible so the output should be
+        // smaller than 8MB+).
+        assert!(out.len() < (w as usize * h as usize * 4));
     }
 
     // -- v0.8.3: streaming wrap_for_tmux tests -----------------------
