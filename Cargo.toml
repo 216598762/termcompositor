@@ -1,6 +1,6 @@
 [package]
 name = "dashcompositor"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Layer-based graphics compositor for the terminal (Kitty graphics protocol / Sixel)"
 license = "MIT"
@@ -15,10 +15,16 @@ publish = false
 
 [features]
 # The `image-decoder` feature pulls in the `image` crate so the
-# `dashcompositor::ImageLayer` type is available. Default OFF so a
-# default build stays dependency-light (only `terminal_size`).
+# `dashcompositor::ImageLayer` type is available.
+# The `kitty-encoder` feature pulls in the `little-kitty` crate so
+# the `Protocol::Kitty` arm of `ProtocolEncoder::encode` produces
+# real Kitty graphics escape sequences; without it, the Kitty arm
+# returns `Err(EncoderError::UnsupportedProtocol("kitty"))`.
+# Sixel is not yet implemented (v0.6.0 work).
+# Default features stay empty so a default build is dep-light.
 default = []
 image-decoder = ["dep:image"]
+kitty-encoder = ["dep:little-kitty"]
 
 [dependencies]
 terminal_size = "0.3"
@@ -27,6 +33,14 @@ terminal_size = "0.3"
 # decoders are enabled (see AGENTS.md §3: evaluate each crate before
 # adopting). Bump to a newer minor as needed.
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+# `little-kitty` is adopted as the v0.5.0 first encoder. Per the
+# crates.io evaluation (March 2026, version 0.0.3, MIT/Apache-2.0,
+# 1K downloads, ~148K SLoC, actively maintained): a low-level
+# interface for the Kitty graphics protocol; supports sprite and
+# Unicode placeholder modes; auto-detects tmux passthrough. Adopted
+# behind the `kitty-encoder` feature so the default build stays
+# dep-light.
+little-kitty = { version = "0.0.3", optional = true }
 
 [lib]
 name = "dashcompositor"
@@ -36,16 +50,22 @@ path = "src/lib.rs"
 name = "dashcompositor"
 path = "src/main.rs"
 
-# Other candidate crates (tiny-skia, wgpu, etc.) are still under
-# evaluation per AGENTS.md §3 and remain commented out.
+# Other candidate crates (tiny-skia, wgpu, icy_sixel, kittage,
+# rasteroid) are still under evaluation per AGENTS.md §3 and remain
+# commented out.
 #
 # [dependencies]
-# tiny-skia = { version = "0.11", optional = true }
-# wgpu      = { version = "23",  optional = true }
+# tiny-skia  = { version = "0.11", optional = true }
+# wgpu       = { version = "23",  optional = true }
+# icy_sixel  = { version = "0.5",  optional = true }
+# kittage    = { version = "0.4",  optional = true }
+# rasteroid  = { version = "0.3",  optional = true }
 #
 # [features]
 # cpu-compositor  = ["dep:tiny-skia"]
 # gpu-compositor  = ["dep:wgpu"]
+# sixel-encoder   = ["dep:icy_sixel"]
+# auto-detect     = ["dep:rasteroid"]
 
 [profile.release]
 opt-level = 3

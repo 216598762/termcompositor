@@ -13,7 +13,7 @@ pub mod layer;
 pub mod terminal;
 
 pub use compositor::{Compositor, CpuCompositor, LayerStack};
-pub use encoder::Protocol;
+pub use encoder::{EncoderError, Protocol, ProtocolEncoder};
 pub use framebuffer::{blend_over, FrameBuffer};
 pub use geometry::Rect;
 pub use layer::{Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};

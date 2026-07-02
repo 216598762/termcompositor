@@ -1,4 +1,5 @@
-//! `dashcompositor` CLI -- terminal-fit layer-stack demo.
+//! `dashcompositor` CLI -- terminal-fit layer-stack + Kitty encoder
+//! demo.
 //!
 //! Demonstrates that a backend (this binary) can:
 //! 1. Detect the host terminal's cell-grid size via
@@ -11,14 +12,22 @@
 //! 3. Render the stack into a framebuffer auto-sized to the
 //!    terminal via
 //!    [`dashcompositor::LayerStack::render_to_current_terminal`].
-//! 4. Report the terminal size back through the API.
+//! 4. Encode the framebuffer via
+//!    [`dashcompositor::ProtocolEncoder`] (Kitty when the
+//!    `kitty-encoder` feature is enabled) and write the escape
+//!    sequences to stdout. Stderr is reserved for human-readable
+//!    logging.
 
-use dashcompositor::{LayerStack, RectLayer, SolidColor, TerminalSize, TextLayer};
+use std::io::Write;
+
+use dashcompositor::{
+    LayerStack, Protocol, ProtocolEncoder, RectLayer, SolidColor, TerminalSize, TextLayer,
+};
 
 fn main() {
     let size = TerminalSize::current();
     eprintln!(
-        "dashcompositor v0.4.0 -- multi-layer compositor: \
+        "dashcompositor v0.5.0 -- multi-layer + Kitty encoder: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,
@@ -63,21 +72,37 @@ host terminal = {cols} cols x {rows} rows",
         fb.pixels().len(),
         stack.len(),
     );
-    eprintln!(
-        "  bg    : {}",
-        stack.get(bg).map_or("<missing>", |e| e.name()),
-    );
-    eprintln!(
-        "  rect  : {} (bounds={:?})",
-        stack.get(rect).map_or("<missing>", |e| e.name()),
-        stack.get(rect).and_then(|e| e.layer().bounds()),
-    );
-    eprintln!(
-        "  label : {:?}",
-        stack.get(label).map(|e| e.layer().bounds()),
-    );
 
-    // 5. Control at will: hide the title, remove the background,
+    // 5. Encode the framebuffer to Kitty escape sequences and
+    //    write them to stdout. Stderr is for human-readable log
+    //    lines; the raw escape bytes go to stdout.
+    let protocol = Protocol::Kitty;
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    match protocol.encode(&fb) {
+        Ok(bytes) => {
+            eprintln!(
+                "encoded {} bytes via {}; writing to stdout",
+                bytes.len(),
+                protocol.as_str(),
+            );
+            handle.write_all(&bytes).expect("write to stdout");
+            handle.flush().expect("flush stdout");
+        }
+        Err(e) => {
+            eprintln!(
+                "encoder error for protocol `{}`: {e} (is the required Cargo feature enabled?)",
+                protocol.as_str(),
+            );
+        }
+    }
+
+    // Exercise the control API on the rect before the post-render mutations:
+    if let Some(entry) = stack.get_mut(rect) {
+        entry.set_opacity(0.75);
+    }
+
+    // 6. Control at will: hide the title, remove the background,
     //    re-add a new accent layer with a z-override, re-render.
     if let Some(entry) = stack.get_mut(label) {
         entry.set_visible(false);
@@ -95,4 +120,7 @@ host terminal = {cols} cols x {rows} rows",
         fb2.pixels().len(),
         stack.len(),
     );
+    if let Ok(bytes) = protocol.encode(&fb2) {
+        eprintln!("re-encoded {} bytes", bytes.len());
+    }
 }

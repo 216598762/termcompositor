@@ -1,3 +1,81 @@
+## 0.5.0 (2026-07-02)
+
+First protocol encoder: the Kitty graphics protocol, wired up via
+the optional `little-kitty` (v0.0.3) crate behind a new
+`kitty-encoder` Cargo feature. Sixel remains the v0.6.0 work.
+
+### Added
+- `ProtocolEncoder` trait in `dashcompositor::encoder`:
+  - Signature: `fn encode(&self, frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError>`.
+  - Implementor: `Protocol`, dispatching on the protocol variant.
+  - Returns a `Vec<u8>` of terminal escape sequences; the caller
+    writes them to stdout. No I/O is performed inside `encode`.
+- `EncoderError` enum with hand-rolled `Display` + `Error` impls
+  (no `thiserror` dep, to honour the project's minimal-deps
+  ethos):
+  - `UnsupportedProtocol(&'static str)` -- returned by the
+    disabled-feature Kitty arm and by Sixel until v0.6.0.
+  - `InvalidDimensions { width, height }` -- zero-size framebuffer.
+  - `Encode(String)` -- wraps the underlying `little_kitty`
+    `std::io::Error`.
+- Private `kitty` submodule gated on `kitty-encoder`. Uses the
+  real `little_kitty` 0.0.3 API:
+  - `Command::default()` + `.with_control(key, value)` with
+    `value: Into<ControlValue>`.
+  - `ControlValue::Char('T')` for the action
+    (transmit and put), `ControlValue::UnsignedInteger(...)` for
+    the format (32 = 32-bit RGBA), quiet flag (2 = suppress
+    responses), and width / height.
+  - `little_kitty::io::KittyCommandWriter` (blanket-impl'd for
+    any `Write`, including `Vec<u8>`) for `write_start`,
+    `write_base64(self, data)`, `write_end`.
+  - `ControlValue::write(&mut out)` to serialise each control
+    value into the byte buffer.
+  - Output format: `\x1b_Ga=T,f=32,q=2,s=W,v=H;<base64-payload>\x1b\\`.
+- `Cargo.toml`:
+  - `little-kitty = "0.0.3"` as an optional dependency.
+  - `kitty-encoder = ["dep:little-kitty"]` Cargo feature.
+  - Default features stay empty; the default build remains
+    dependency-light.
+- 7 new unit tests in `src/encoder.rs`:
+  - `as_str_matches_variant` -- protocol name strings.
+  - `encoder_error_display_includes_context` -- `Display` impl.
+  - `sixel_encode_is_unsupported_in_v050` -- Sixel always returns
+    `UnsupportedProtocol`.
+  - `kitty_encode_is_unsupported_without_feature` -- Kitty without
+    the feature returns `UnsupportedProtocol`.
+  - `kitty_encode_rejects_zero_dimensions` -- zero-size returns
+    `InvalidDimensions`.
+  - `kitty_encode_produces_valid_escape_framing` -- output starts
+    with `\x1b_G`, ends with `\x1b\\`, and the control payload
+    contains `a=T`, `f=32`, `q=2`, `s=2`, `v=2`.
+  - `kitty_encode_is_deterministic_for_same_input` -- pure
+    encoder.
+- `main.rs` demo now encodes the auto-fit framebuffer via
+  `Protocol::Kitty` and writes the escape bytes to stdout; stderr
+  carries the human-readable log lines.
+
+### Changed
+- `Cargo.toml` version bumped to 0.5.0.
+- `lib.rs` re-exports `EncoderError` and `ProtocolEncoder`
+  (ungated, so the API surface is stable across feature
+  combinations; calling `encode` on a disabled-feature protocol
+  returns `Err(UnsupportedProtocol)` at runtime).
+
+### Notes
+- `little-kitty` evaluation per AGENTS.md §3: MIT/Apache-2.0,
+  v0.0.3 (March 2026), ~148K SLoC, actively maintained, the
+  recommended pick over `kittage` (heavier, full-featured) and
+  `kitty-graphics-protocol` (last build failed on docs.rs). The
+  `rasteroid` auto-detect wrapper is deferred to v0.7.0+ (it
+  doesn't expose granular feature flags to keep the dep
+  footprint tight).
+- `cargo build`, `cargo test` (65 unit tests with default
+  features, 71 with `--features kitty-encoder`; +1 doc test),
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  and `cargo build --release` are all clean -- BOTH with default
+  features and with `--features kitty-encoder`.
+
 ## 0.4.0 (2026-07-02)
 
 Multi-layer compositor: three new `Layer` types, an optional

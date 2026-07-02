@@ -137,6 +137,7 @@ let id = stack.push(img);
 
 | Feature          | Default | Pulls in          | Enables                        |
 | ---------------- | :-----: | ----------------- | ------------------------------ |
+| `kitty-encoder`   |   off   | `little-kitty = "0.0.3"` | `Protocol::Kitty` produces real Kitty escape sequences |
 | `image-decoder`  |   off   | `image = "0.25"`  | `ImageLayer` (PNG + JPEG)      |
 
 A custom `Compositor` can be plugged in via `LayerStack::render_with`;
