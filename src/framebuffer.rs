@@ -4,6 +4,30 @@
 //! `(x, y)`. Each pixel is `[R, G, B, A]` with channels in `0..=255`.
 
 /// A flat RGBA pixel buffer.
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::FrameBuffer;
+///
+/// // Create a 4x4 transparent framebuffer.
+/// let mut fb = FrameBuffer::new(4, 4);
+/// assert_eq!(fb.width(), 4);
+/// assert_eq!(fb.height(), 4);
+///
+/// // Write a red pixel at (1, 2).
+/// if let Some(px) = fb.get_pixel_mut(1, 2) {
+///     *px = [255, 0, 0, 255];
+/// }
+/// assert_eq!(fb.get_pixel(1, 2), Some(&[255, 0, 0, 255]));
+///
+/// // Out-of-bounds access returns None.
+/// assert_eq!(fb.get_pixel(99, 99), None);
+///
+/// // Clear resets all pixels to transparent.
+/// fb.clear();
+/// assert_eq!(fb.get_pixel(1, 2), Some(&[0, 0, 0, 0]));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrameBuffer {
     width: u32,
@@ -87,6 +111,21 @@ impl FrameBuffer {
 /// `src_alpha` is clamped to `0.0..=1.0`. A `src_alpha` of `0.0`
 /// is a no-op; a `src_alpha` of `1.0` writes the source colour
 /// directly (overwriting the destination's RGB and alpha).
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::blend_over;
+///
+/// // Blend a translucent red over a blue background.
+/// let mut dst = [0, 0, 255, 255];  // opaque blue
+/// blend_over(&mut dst, &[255, 0, 0, 128], 0.5);
+///
+/// // The result should be a purple-ish colour.
+/// assert!(dst[0] > 0);  // red channel contributed
+/// assert!(dst[2] > 0);  // blue channel still present
+/// assert!(dst[3] > 128); // combined alpha > 128
+/// ```
 pub fn blend_over(dst: &mut [u8; 4], src: &[u8; 4], src_alpha: f32) {
     let a = src_alpha.clamp(0.0, 1.0);
     if a == 0.0 {

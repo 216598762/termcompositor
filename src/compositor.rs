@@ -14,6 +14,35 @@ use crate::terminal::TerminalSize;
 /// Implementations are expected to iterate over the stack in render
 /// order (typically sorted by z), respect each entry's visibility and
 /// opacity, and write the result into `target`.
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::{Compositor, FrameBuffer, LayerStack, SolidColor};
+///
+/// /// A custom compositor that renders layers in reverse stack order.
+/// struct ReverseCompositor;
+///
+/// impl Compositor for ReverseCompositor {
+///     fn compose(&self, stack: &LayerStack, target: &mut FrameBuffer) {
+///         for entry in stack.entries().iter().rev() {
+///             if entry.is_visible() && entry.opacity() > 0.0 {
+///                 entry.layer().render(target, (0, 0), entry.opacity());
+///             }
+///         }
+///     }
+/// }
+///
+/// let mut stack = LayerStack::new();
+/// stack.push(SolidColor::new(255, 0, 0, 255).with_z(10));
+/// stack.push(SolidColor::new(0, 255, 0, 255).with_z(0));
+///     let mut fb = FrameBuffer::new(1, 1);
+///     stack.render_with(&ReverseCompositor, &mut fb);
+///     // The ReverseCompositor reverses stack order (insertion
+///     // order, not z-order), so the first-pushed red is rendered
+///     // last, on top of green.
+///     assert_eq!(fb.pixels()[0], [255, 0, 0, 255]);
+/// ```
 pub trait Compositor {
     /// Composites `stack` into `target`.
     fn compose(&self, stack: &LayerStack, target: &mut FrameBuffer);
@@ -24,6 +53,23 @@ pub trait Compositor {
 /// dependencies; suitable as a reference implementation and for
 /// tests. Each layer's own `render` is responsible for blending with
 /// the destination pixels using the entry's opacity.
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::{Compositor, CpuCompositor, FrameBuffer, LayerStack, SolidColor};
+///
+/// let mut stack = LayerStack::new();
+/// let bg = stack.push(SolidColor::new(10, 20, 30, 255).with_z(0));
+/// let fg = stack.push(SolidColor::new(200, 100, 50, 255).with_z(10));
+/// stack.get_mut(fg).unwrap().set_opacity(0.5);
+///
+/// let mut fb = FrameBuffer::new(1, 1);
+/// // Render using the default compositor.
+/// CpuCompositor.compose(&stack, &mut fb);
+/// // The foreground (at 0.5 opacity) blends over the background.
+/// assert!(fb.pixels()[0][0] > 10);  // red contributed from fg
+/// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CpuCompositor;
 
@@ -167,6 +213,18 @@ impl LayerStack {
     /// Removes all entries, leaving the stack empty. Ids are not
     /// reset — a subsequent `push` will receive an id greater than
     /// any previously issued.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dashcompositor::{LayerStack, SolidColor};
+    ///
+    /// let mut stack = LayerStack::new();
+    /// stack.push(SolidColor::new(0, 0, 0, 255));
+    /// assert!(!stack.is_empty());
+    /// stack.clear();
+    /// assert!(stack.is_empty());
+    /// ```
     pub fn clear(&mut self) {
         self.entries.clear();
     }
@@ -174,6 +232,19 @@ impl LayerStack {
     /// Renders the stack into `target` using the default
     /// [`CpuCompositor`]. Equivalent to
     /// `CpuCompositor.compose(self, target)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dashcompositor::{FrameBuffer, LayerStack, SolidColor};
+    ///
+    /// let mut stack = LayerStack::new();
+    /// stack.push(SolidColor::new(0, 128, 0, 255));
+    ///
+    /// let mut fb = FrameBuffer::new(2, 2);
+    /// stack.render(&mut fb);
+    /// assert_eq!(fb.pixels()[0], [0, 128, 0, 255]);
+    /// ```
     pub fn render(&self, target: &mut FrameBuffer) {
         CpuCompositor.compose(self, target);
     }

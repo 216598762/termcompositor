@@ -43,6 +43,16 @@ use std::io::Write;
 
 /// Terminal graphics protocol used to encode the composited
 /// framebuffer.
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::Protocol;
+///
+/// assert_eq!(Protocol::Kitty.as_str(), "kitty");
+/// assert_eq!(Protocol::Sixel.as_str(), "sixel");
+/// assert_eq!(Protocol::Auto.as_str(), "auto");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     /// The kitty graphics protocol -- modern and feature-rich.
@@ -70,6 +80,21 @@ impl Protocol {
 }
 
 /// Errors produced by [`ProtocolEncoder::encode`].
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::EncoderError;
+///
+/// let err = EncoderError::UnsupportedProtocol("kitty");
+/// assert_eq!(
+///     err.to_string(),
+///     "protocol kitty is not supported in this build"
+/// );
+///
+/// let err = EncoderError::InvalidDimensions { width: 0, height: 5 };
+/// assert_eq!(err.to_string(), "framebuffer has invalid dimensions: 0x5");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncoderError {
     /// The requested protocol is not compiled into this build
@@ -271,6 +296,21 @@ pub(crate) fn detect_with_env(
 ///
 /// Implementors return a `Vec<u8>` of escape sequences the
 /// caller writes to stdout; the encoding does no I/O itself.
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::{FrameBuffer, Protocol, ProtocolEncoder};
+///
+/// let fb = FrameBuffer::new(2, 2);
+/// // Protocol::Auto dispatches through `detect()` at encode time.
+/// // Without an encoder feature enabled, this returns an error.
+/// let result = Protocol::Kitty.encode(&fb);
+/// match result {
+///     Ok(bytes) => assert!(!bytes.is_empty()),
+///     Err(e) => assert!(e.to_string().contains("not supported")),
+/// }
+/// ```
 pub trait ProtocolEncoder {
     /// Encodes `frame` into escape-sequence bytes for `self`.
     fn encode(&self, frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError>;
@@ -366,6 +406,18 @@ impl ProtocolEncoder for Protocol {
 /// per-protocol streaming entry point and writes the result
 /// to `out`. **v0.8.6**: mirrors the private [`dispatch()`]
 /// function but writes to a `&mut impl Write` sink instead
+///
+/// # Example
+///
+/// ```
+/// use dashcompositor::{dispatch_to_writer, detect, FrameBuffer};
+///
+/// let fb = FrameBuffer::new(2, 2);
+/// let mut out = Vec::new();
+/// // This may return UnsupportedProtocol if no encoder feature
+/// // is enabled, but it always completes without panicking.
+/// let _ = dispatch_to_writer(detect(), &fb, &mut out);
+/// ```
 /// of returning a `Vec<u8>`. This combines the v0.8.2 Kitty
 /// streaming, v0.8.3 tmux passthrough wrap, v0.8.4 Sixel
 /// streaming, and v0.8.5 fixed-palette Sixel streaming
