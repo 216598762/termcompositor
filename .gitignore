@@ -38,3 +38,14 @@ coverage/
 target/
 **/*.rs.bk
 .cargo/
+
+# Project-local rules
+
+# AGENTS.md is the contributor / agent guide and is intentionally
+# local-only: it documents the v0.5+ release workflow, the GPG
+# signing setup, and the AI-agent operating rules for this
+# specific host. Other contributors can write their own copy
+# from scratch; we don't want to track the host-specific
+# passphrase location, keygrip, and the v0.x release-tagging
+# workflow in the shared repo.
+AGENTS.md
