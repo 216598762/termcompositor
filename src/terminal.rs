@@ -43,7 +43,7 @@ impl TerminalSize {
     /// Returns the size as `(width, height)` in cells, suitable for
     /// passing to [`FrameBuffer::new`](crate::FrameBuffer::new).
     pub const fn as_framebuffer_size(self) -> (u32, u32) {
-        (u32::from(self.cols), u32::from(self.rows))
+        (self.cols as u32, self.rows as u32)
     }
 }
 
