@@ -40,8 +40,8 @@ font-rasterizer = ["dep:fontdue"]
 terminal_size = "0.3"
 # `image` is adopted as an optional dependency. `default-features =
 # false` keeps transitive deps minimal; only the PNG and JPEG
-# decoders are enabled (see AGENTS.md §3: evaluate each crate before
-# adopting). Bump to a newer minor as needed.
+# decoders are enabled (each crate is evaluated before adoption).
+# Bump to a newer minor as needed.
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 # `little-kitty` is the v0.5.0 first encoder. Per the crates.io
 # evaluation (March 2026, version 0.0.3, MIT/Apache-2.0, ~1K
@@ -87,7 +87,7 @@ name = "dashcompositor"
 path = "src/main.rs"
 
 # Other candidate crates (tiny-skia, wgpu, kittage, rasteroid) are
-# still under evaluation per AGENTS.md §3 and remain commented out.
+# still under evaluation and remain commented out.
 #
 # [dependencies]
 # tiny-skia  = { version = "0.11", optional = true }
@@ -105,7 +105,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 
-# AGENTS.md §6: missing-doc warnings are part of "definition of done".
+# Missing-doc warnings are part of the "definition of done".
 # Promote to deny in CI; here we surface them so authors can fix in dev.
 [lints.rust]
 missing_docs = "warn"

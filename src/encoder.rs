@@ -2,8 +2,8 @@
 //!
 //! The runtime picks a [`Protocol`] (Kitty graphics protocol,
 //! Sixel, or auto-detected) based on terminal capability
-//! detection (via `TERM`, `TERM_PROGRAM`, `COLORTERM`)
-//! per AGENTS.md §7, preferring [`Protocol::Kitty`] when the
+//! detection (via `TERM`, `TERM_PROGRAM`, `COLORTERM`),
+//! preferring [`Protocol::Kitty`] when the
 //! host supports it and falling back to [`Protocol::Sixel`]
 //! otherwise. The [`Protocol::Auto`] variant defers the
 //! choice to the pure env-var shim [`detect`] (or, when
@@ -205,7 +205,7 @@ pub fn detect() -> Protocol {
 /// This function performs I/O on the terminal's stdin/stdout --
 /// it writes a Kitty query and reads a response, blocking
 /// until the terminal answers. Do NOT call it from a pure
-/// encoder (see AGENTS.md §7); use [`detect`] for that. This
+/// encoder; use [`detect`] for that. This
 /// is the right entry point for a one-shot startup probe
 /// (e.g. the `main.rs` demo's `--probe` flag).
 #[cfg(feature = "kitty-encoder")]

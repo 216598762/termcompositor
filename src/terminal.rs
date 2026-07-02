@@ -3,10 +3,9 @@
 //! to fit.
 //!
 //! The `terminal_size` crate handles the cross-platform `ioctl`
-//! (Unix) and console-mode (Windows) call. We adopt it because
-//! AGENTS.md section 3 prioritises library reuse over hand-rolling,
-//! and `terminal_size` is a tiny, MIT-licensed crate with no
-//! transitive dependencies.
+//! (Unix) and console-mode (Windows) call. We adopt it because it
+//! prioritises library reuse over hand-rolling, and `terminal_size`
+//! is a tiny, MIT-licensed crate with no transitive dependencies.
 
 /// Reported dimensions of the host terminal in character cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

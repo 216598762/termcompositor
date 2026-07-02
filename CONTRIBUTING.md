@@ -4,8 +4,6 @@ Thank you for your interest in contributing! `dashcompositor` is a
 layer-based graphics compositor for the terminal, written in Rust.
 
 This file covers the conventions and workflows for human contributors.
-AI agents working on the project should read [`AGENTS.md`](./AGENTS.md)
-for the full rulebook.
 
 ## Quick start
 
@@ -57,7 +55,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 <type>: short description (≤72 chars)
 
 Longer body explaining *what* and *why*. Wrap at 72 characters.
-Reference relevant design decisions or AGENTS.md rules.
+Reference relevant design decisions.
 ```
 
 Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`.

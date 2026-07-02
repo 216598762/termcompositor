@@ -26,8 +26,8 @@
 //! # let _ = dispatch_to_writer(detect(), &fb, &mut out);
 //! ```
 //!
-//! See [`AGENTS.md`](../AGENTS.md) and the
-//! [README](../README.md) for the full architecture.
+//! See the [README](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md)
+//! for the full architecture.
 //!
 //! ## Feature flags
 //!

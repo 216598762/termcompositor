@@ -21,11 +21,6 @@ not parse shell input or manage a TTY. It composes a frame and writes it out.
 - Pure Rust stack; transitively relies on well-trodden crates from
   [awesome-rust](https://github.com/rust-unofficial/awesome-rust).
 
-## Status
-
-Early-stage design. The contributor / agent rulebook is
-[`AGENTS.md`](./AGENTS.md) — read it before opening a PR.
-
 ## How it works (one-line)
 
 Layers → compositor → framebuffer → protocol encoder → terminal escape
@@ -55,8 +50,9 @@ sequences.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full contributor
-guide. AI agents should read [`AGENTS.md`](./AGENTS.md) first.
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full stack and API reference.
+- [`DOCS.md`](./DOCS.md) — usage guide (library + CLI).
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — contributor guide.
 
 Key rules:
 

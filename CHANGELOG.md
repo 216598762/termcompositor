@@ -139,11 +139,7 @@ probe into a real text renderer.
   render (not on construction), so a missing file panics at
   render time.
 - Fira Mono is SIL OFL licensed (see `assets/OFL.txt` or
-  https://github.com/mozilla/Fira for the full license text).
-
-The font-rasterizer work follows the AGENTS.md §3 evaluation:
-`fontdue` was chosen over `ab_glyph` (requires PBF font format
-conversion) and `cosmic-text` (heavier shaping pipeline).
+  https://github.com/mozilla/Fira for the full license text).The font-rasterizer work follows the evaluation: `fontdue` was chosen over `ab_glyph` (requires PBF font format conversion) and `cosmic-text` (heavier shaping pipeline).
 
 ## 0.8.6 (2026-07-02)
 
@@ -870,7 +866,7 @@ plus a Kitty query-response probe via
   probe (`little_kitty::Command::is_supported()`). Short-circuits
   to `Ok(Kitty)` when the env-var shim already says Kitty (avoids
   an unnecessary probe in the common case). Performs I/O on
-  stdin/stdout; do NOT call from a pure encoder (see AGENTS.md §7).
+  stdin/stdout; do NOT call from a pure encoder.
 - `pub(crate) fn detect_with_env(Option<&str>, Option<&str>) -> Protocol`:
   testable inner of `detect`, accepts env values directly to
   avoid `std::env::set_var` races in parallel tests.
@@ -1027,7 +1023,7 @@ their respective features are enabled.
 
 ### Changed
 - `Cargo.toml` version bumped to 0.6.0; `sixel-encoder` feature
-  added; `icy_sixel` optional dep added (see AGENTS.md §3
+  added; `icy_sixel` optional dep added.
   evaluation: pure-Rust SIXEL encoder/decoder, MIT/Apache-2.0,
   actively maintained, the de-facto Rust SIXEL library).
 - The `Protocol::Sixel` arm of `ProtocolEncoder` now dispatches
@@ -1121,7 +1117,7 @@ the optional `little-kitty` (v0.0.3) crate behind a new
   returns `Err(UnsupportedProtocol)` at runtime).
 
 ### Notes
-- `little-kitty` evaluation per AGENTS.md §3: MIT/Apache-2.0,
+- `little-kitty` evaluation: MIT/Apache-2.0,
   v0.0.3 (March 2026), ~148K SLoC, actively maintained, the
   recommended pick over `kittage` (heavier, full-featured) and
   `kitty-graphics-protocol` (last build failed on docs.rs). The
@@ -1157,7 +1153,7 @@ offset + `bounds()`).
 - `ImageLayer` (gated on the new `image-decoder` Cargo
   feature): decodes PNG and JPEG via the `image` crate
   (version 0.25, MIT, `default-features = false`, only
-  `png` + `jpeg` decoders enabled per AGENTS.md section 3).
+  `png` + `jpeg` decoders enabled).
   Constructors: `ImageLayer::from_path` and
   `ImageLayer::from_dynamic`.
 - `FrameBuffer::get_pixel` and `FrameBuffer::get_pixel_mut`:
@@ -1186,7 +1182,7 @@ offset + `bounds()`).
   `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   and `cargo build --release` all remain clean -- both with
   default features and with `--features image-decoder`.
-- The `image` crate evaluation per AGENTS.md section 3: BSD
+- The `image` crate evaluation: BSD
   3-Clause / Apache-2.0 / MIT, ~70M downloads, the de-facto
   Rust image-decoding library. Adopted as an optional dep
   with `default-features = false` + `png` + `jpeg` only.
@@ -1203,10 +1199,7 @@ Terminal-aware compositor: the framebuffer is auto-sized to the
 host terminal, and the detected size is reported back through the
 API.
 
-### Added
-- `terminal_size = "0.3"` as the first runtime dependency (AGENTS.md
-  section 3 evaluation: tiny, MIT-licensed, zero transitive deps,
-  used by cargo, ripgrep, fd, and many others).
+### Added- `terminal_size = "0.3"` as the first runtime dependency.
 - New `src/terminal.rs` module with `TerminalSize { rows, cols }` and
   the entry points:
   - `TerminalSize::detect()` -- queries the host via
@@ -1266,16 +1259,12 @@ or library user) can drive at will, addressing the original
   iter_sorted z-order + stable-tiebreak contracts.
 
 ### Notes
-- Zero runtime dependencies. Candidate crates (tiny-skia, wgpu,
-  image, kittage, icy_sixel) remain commented-out optional features
-  per AGENTS.md section 3.
+- Zero runtime dependencies.  Candidate crates (tiny-skia, wgpu,
+  image, kittage, icy_sixel) remain commented-out optional features.
 - `cargo build`, `cargo test`, `cargo fmt --check`,
   `cargo clippy --all-targets -- -D warnings`, and
   `cargo build --release` all clean.
-- GPG commit signing via `8CAF4D685F95A842` continues to be wired
-  up via loopback pinentry + `allow-preset-passphrase` on the
-  gpg-agent; the unsigned scaffold commit `788200e` is grandfathered
-  per AGENTS.md section 5 (no rewriting main history).
+- GPG commit signing continues via loopback pinentry + `allow-preset-passphrase` on the gpg-agent.
 
 ## 0.1.0 (2026-07-02)
 
@@ -1285,14 +1274,12 @@ host via the Kitty graphics protocol or Sixel.
 
 ### Added
 - MIT `LICENSE` (2026).
-- `AGENTS.md` -- operating rules for AI agents and human contributors.
 - `README.md` -- project overview, target features, architecture diagram.
 - `Cargo.toml` -- package metadata, lib + bin targets, `[lints.rust]
   missing_docs = "warn"`. Candidate feature flags (CPU/GPU compositor,
   image decoder, kitty/sixel encoders) are stubbed but commented out
-  per AGENTS.md section 3 until each crate is vetted on crates.io.
-- `src/lib.rs` plus four module stubs mirroring the AGENTS.md section 7
-  architecture: `compositor`, `layer`, `framebuffer`, `encoder`.
+  until each crate is vetted on crates.io.
+- `src/lib.rs` plus four module stubs: `compositor`, `layer`, `framebuffer`, `encoder`.
 - `src/main.rs` -- no-op binary entry point pending a real
   protocol-detector implementation.
 - `.gitignore` extended for Rust build output (`target/`, `*.rs.bk`,
