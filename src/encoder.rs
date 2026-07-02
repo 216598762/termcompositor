@@ -351,11 +351,46 @@ mod kitty {
     use little_kitty::io::KittyCommandWriter;
     use std::io::Write;
 
-    /// Encodes `frame` as a single Kitty "transmit and display"
-    /// command using raw RGBA pixel data (format code 32 per
-    /// the Kitty graphics protocol spec). The returned bytes
-    /// are the full escape-sequence payload ready to be
-    /// written to the terminal.
+    /// Number of RGBA pixels per chunk for the v0.8.1
+    /// chunked Kitty encoding. Derived from the Kitty
+    /// graphics protocol's per-chunk payload limit
+    /// (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>):
+    /// 4096 base64 chars decode to 3072 raw bytes = 768
+    /// 4-byte (32-bit RGBA) pixels, with no base64
+    /// padding. Because 768*4 = 3072 is a multiple of 3,
+    /// the base64 encoding of an intermediate (full-sized)
+    /// chunk is exactly 4096 chars -- a multiple of 4, the
+    /// hard alignment the spec requires for non-last
+    /// chunks. Hardcoded as a `const` (not computed at
+    /// runtime) to keep the encode hot path
+    /// allocation-free. `pub(crate)` so the v0.8.1
+    /// chunking tests in the parent `tests` module can
+    /// reference it (they need to construct framebuffers
+    /// at the exact chunk boundary).
+    pub(crate) const PIXELS_PER_CHUNK: usize = 768;
+
+    /// Encodes `frame` as one or more Kitty "transmit and
+    /// display" APC commands using raw RGBA pixel data
+    /// (format code 32 per the Kitty graphics protocol
+    /// spec). The returned bytes are the full escape-sequence
+    /// payload ready to be written to the terminal.
+    ///
+    /// **v0.8.1 chunking**: for framebuffers whose
+    /// base64-encoded payload fits within a single chunk
+    /// (≤ `PIXELS_PER_CHUNK` = 768 pixels for 32-bit RGBA),
+    /// emits the v0.8.0 single-command format
+    /// (`\x1b_G<controls>;<base64>\x1b\\` with no `m` key)
+    /// for backwards compatibility with terminals that
+    /// pre-date the chunking extension. For larger
+    /// framebuffers, splits the payload into
+    /// `PIXELS_PER_CHUNK`-pixel chunks and emits one APC
+    /// per chunk: the first carries the full control list
+    /// (`a`, `f`, `q`, `s`, `v`) plus `m=1`, intermediate
+    /// chunks carry only `m=1`, and the final chunk carries
+    /// `m=0`. All chunks except the last are guaranteed to
+    /// have a base64 payload length that is a multiple of 4
+    /// (the spec's hard requirement) because
+    /// `PIXELS_PER_CHUNK * 4 = 3072` is a multiple of 3.
     pub fn encode(frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError> {
         if frame.width() == 0 || frame.height() == 0 {
             return Err(EncoderError::InvalidDimensions {
@@ -369,24 +404,69 @@ mod kitty {
         // added later if the per-frame allocation becomes a
         // hotspot.
         let rgba: Vec<u8> = frame.pixels().iter().flatten().copied().collect();
+        let total_pixels = rgba.len() / 4;
 
-        // Build the control list. The Kitty graphics protocol
-        // accepts a comma-separated list of key=value pairs
-        // before the payload separator (`;`). We use:
-        //   a=T   -- action: transmit and put (display)
-        //   f=32  -- format: 32-bit RGBA
-        //   q=2   -- quiet: suppress terminal OK/error
-        //            responses
-        //   s=W   -- image width in pixels
-        //   v=H   -- image height in pixels
-        let controls: Vec<(char, ControlValue)> = vec![
-            ('a', ControlValue::Char('T')),
-            ('f', ControlValue::UnsignedInteger(32)),
-            ('q', ControlValue::UnsignedInteger(2)),
-            ('s', ControlValue::UnsignedInteger(frame.width())),
-            ('v', ControlValue::UnsignedInteger(frame.height())),
-        ];
+        // v0.8.1 single-chunk fast path: preserve v0.8.0
+        // wire format exactly (no `m` key) for framebuffers
+        // that fit in one chunk. This means terminals that
+        // pre-date the chunking extension (or that have it
+        // disabled) keep working unchanged, and the small-
+        // image output is byte-identical to v0.8.0.
+        if total_pixels <= PIXELS_PER_CHUNK {
+            return encode_single_chunk(frame.width(), frame.height(), &rgba);
+        }
 
+        // v0.8.1 multi-chunk path: emit one APC per chunk,
+        // concatenating the results. `num_chunks` is
+        // `ceil(total_pixels / PIXELS_PER_CHUNK)`, computed
+        // with `div_ceil` (stable since Rust 1.73).
+        let num_chunks = total_pixels.div_ceil(PIXELS_PER_CHUNK);
+        let mut out = Vec::new();
+        for chunk_idx in 0..num_chunks {
+            let start_pixel = chunk_idx * PIXELS_PER_CHUNK;
+            let end_pixel = (start_pixel + PIXELS_PER_CHUNK).min(total_pixels);
+            // Slice the rgba vec in raw-byte offsets
+            // (4 bytes per pixel). The slice is always
+            // 4-byte aligned (since `rgba` is a `Vec<u8>` of
+            // RGBA quadruplets and we slice on pixel
+            // boundaries), so this is sound.
+            let chunk_rgba = &rgba[start_pixel * 4..end_pixel * 4];
+            let is_last = chunk_idx + 1 == num_chunks;
+            let m_value: u32 = if is_last { 0 } else { 1 };
+
+            // First chunk carries the full control list +
+            // `m=1`. Subsequent chunks carry ONLY `m` -- the
+            // terminal remembers the metadata from the
+            // first chunk (per the spec).
+            let controls: Vec<(char, ControlValue)> = if chunk_idx == 0 {
+                vec![
+                    ('a', ControlValue::Char('T')),
+                    ('f', ControlValue::UnsignedInteger(32)),
+                    ('q', ControlValue::UnsignedInteger(2)),
+                    ('s', ControlValue::UnsignedInteger(frame.width())),
+                    ('v', ControlValue::UnsignedInteger(frame.height())),
+                    ('m', ControlValue::UnsignedInteger(m_value)),
+                ]
+            } else {
+                vec![('m', ControlValue::UnsignedInteger(m_value))]
+            };
+
+            let cmd = build_apc_command(&controls, chunk_rgba)?;
+            out.extend_from_slice(&cmd);
+        }
+        Ok(out)
+    }
+
+    /// Builds a single Kitty APC command with the given
+    /// control list and base64 payload, using the
+    /// `little_kitty::io::KittyCommandWriter` API. Shared
+    /// by the single-chunk fast path and the multi-chunk
+    /// path. Returns the full APC command bytes
+    /// (`\x1b_G<controls>;<base64>\x1b\\`).
+    fn build_apc_command(
+        controls: &[(char, ControlValue)],
+        payload: &[u8],
+    ) -> Result<Vec<u8>, EncoderError> {
         let mut out = Vec::new();
         out.write_start(false, None)?;
         for (i, (key, value)) in controls.iter().enumerate() {
@@ -397,16 +477,28 @@ mod kitty {
             value.write(&mut out)?;
         }
         out.write_all(b";")?;
-        // write_base64 consumes the writer by value (returns
-        // Self) and Base64-encodes the payload per the Kitty
-        // graphics protocol.
-        // TODO(v0.5.x): chunk large images (m=0 more-chunks /
-        // m=1 last chunk) to support multi-megapixel
-        // framebuffers; the current single-command encoder
-        // will hit terminal size limits for very large frames.
-        out = out.write_base64(&rgba)?;
+        // `write_base64` consumes the writer by value
+        // (returns Self) and Base64-encodes the payload.
+        out = out.write_base64(payload)?;
         out.write_end(false)?;
         Ok(out)
+    }
+
+    /// v0.8.0 wire-compatible single-chunk encoder. Emits
+    /// `\x1b_Ga=T,f=32,q=2,s=W,v=H;<base64>\x1b\\` with no
+    /// `m` key. Used by the v0.8.1 `encode` fast path for
+    /// framebuffers that fit in one chunk, and by the
+    /// v0.8.0/v0.8.1 test suite for the existing
+    /// single-chunk framing assertions.
+    fn encode_single_chunk(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, EncoderError> {
+        let controls: Vec<(char, ControlValue)> = vec![
+            ('a', ControlValue::Char('T')),
+            ('f', ControlValue::UnsignedInteger(32)),
+            ('q', ControlValue::UnsignedInteger(2)),
+            ('s', ControlValue::UnsignedInteger(width)),
+            ('v', ControlValue::UnsignedInteger(height)),
+        ];
+        build_apc_command(&controls, rgba)
     }
 
     /// Wraps a complete Kitty APC (`\x1b_G ... \x1b\\`) in a
@@ -1308,6 +1400,209 @@ mod tests {
                 "Explicit Protocol::Kitty with DASHPASSTHROUGH+TMUX must wrap; got prefix: {:?}",
                 &bytes[..bytes.len().min(12)],
             );
+        });
+    }
+
+    // -- v0.8.1: chunked Kitty encoding tests ---------------------------
+    //
+    // These tests verify the v0.8.1 chunking logic: single-chunk
+    // fast path (no m key, byte-identical to v0.8.0 output for
+    // small images) and the multi-chunk path (m=1 on all but
+    // last, m=0 on last, base64 alignment on 4-char boundary).
+    // All tests use `with_env(None, None, None, None, ...)` to
+    // participate in the env-mutex serialization and avoid the
+    // v0.8.0 tmux-passthrough auto-wrap kicking in.
+
+    /// 4 RGBA pixels = 4 * 4 = 16 raw bytes. Base64 of 16 bytes
+    /// is `ceil(16/3)*4 = 24` chars, well under the 4096-char
+    /// chunk limit. The single-chunk fast path should emit the
+    /// v0.8.0 wire format (no `m` key) and the output should be
+    /// byte-identical to the v0.8.0 single-command encoder.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_single_chunk_produces_no_m_key() {
+        with_env(None, None, None, None, || {
+            let fb = FrameBuffer::new(2, 2);
+            let bytes = super::kitty::encode(&fb).unwrap();
+            // Starts with the APC introducer and ends with the
+            // APC terminator (existing v0.8.0 framing).
+            assert!(bytes.starts_with(b"\x1b_G"));
+            assert!(bytes.ends_with(b"\x1b\\"));
+            // Parse the controls and assert NO `m` key.
+            let s = std::str::from_utf8(&bytes).unwrap();
+            let payload_start = "\x1b_G".len();
+            let payload_end = s.find(';').unwrap();
+            let controls = &s[payload_start..payload_end];
+            assert!(
+                !controls.contains(",m=") && !controls.starts_with("m="),
+                "v0.8.0 single-chunk fast path must NOT include m key, got controls: {controls:?}"
+            );
+            // Existing v0.8.0 control keys must all be present.
+            for key in &["a=T", "f=32", "q=2", "s=2", "v=2"] {
+                assert!(controls.contains(key), "missing control {key}");
+            }
+        });
+    }
+
+    /// Exactly `PIXELS_PER_CHUNK` = 768 pixels = 3072 raw bytes.
+    /// Base64 of 3072 bytes is exactly 4096 chars (no padding),
+    /// which is the chunk limit boundary. This should still use
+    /// the single-chunk fast path (the condition is `<=`, not
+    /// `<`).
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_exactly_768_pixels_is_single_chunk() {
+        with_env(None, None, None, None, || {
+            // 768 * 1 = 768 pixels, single row. Width*height
+            // is exactly PIXELS_PER_CHUNK.
+            let fb = FrameBuffer::new(super::kitty::PIXELS_PER_CHUNK as u32, 1);
+            let bytes = super::kitty::encode(&fb).unwrap();
+            let s = std::str::from_utf8(&bytes).unwrap();
+            let payload_start = "\x1b_G".len();
+            let payload_end = s.find(';').unwrap();
+            let controls = &s[payload_start..payload_end];
+            // No `m` key: single-chunk fast path.
+            assert!(
+                !controls.contains("m="),
+                "exactly-768-pixel frame must use single-chunk fast path, got controls: {controls:?}"
+            );
+        });
+    }
+
+    /// `PIXELS_PER_CHUNK + 1` = 769 pixels. This is just over
+    /// the single-chunk threshold, so the multi-chunk path
+    /// kicks in. Expected: exactly 2 chunks -- the first with
+    /// `m=1` and the full control list, the second with
+    /// `m=0` and only the `m` control.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_two_chunks_has_m1_m0() {
+        with_env(None, None, None, None, || {
+            let w = super::kitty::PIXELS_PER_CHUNK as u32 + 1; // 769
+            let fb = FrameBuffer::new(w, 1);
+            let bytes = super::kitty::encode(&fb).unwrap();
+            let s = std::str::from_utf8(&bytes).unwrap();
+            // Count APC introducers (each chunk starts with
+            // `\x1b_G`). Should be exactly 2.
+            let introducer_count = s.matches("\x1b_G").count();
+            assert_eq!(
+                introducer_count, 2,
+                "769-pixel frame must produce exactly 2 chunks, got {introducer_count}"
+            );
+            // First chunk has `m=1` and the full control list.
+            let first_chunk_start = s.find("\x1b_G").unwrap() + "\x1b_G".len();
+            let first_chunk_end = s.find(';').unwrap();
+            let first_controls = &s[first_chunk_start..first_chunk_end];
+            assert!(first_controls.contains("a=T"), "first chunk missing a=T");
+            assert!(first_controls.contains("f=32"), "first chunk missing f=32");
+            assert!(
+                first_controls.contains("s=769"),
+                "first chunk missing s=769"
+            );
+            assert!(first_controls.contains("m=1"), "first chunk must have m=1");
+            // Second chunk has `m=0` and ONLY `m`.
+            let second_chunk_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let second_chunk_end = s.rfind(';').unwrap();
+            let second_controls = &s[second_chunk_start..second_chunk_end];
+            assert_eq!(second_controls, "m=0", "second chunk must have only m=0");
+        });
+    }
+
+    /// A 3-chunk frame (e.g. 769*2 = 1538 pixels, or 2*PIXELS_PER_CHUNK+1).
+    /// Verifies that intermediate chunks carry only `m=1`
+    /// (not the full control list) and the last carries `m=0`.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_three_chunks_boundary() {
+        with_env(None, None, None, None, || {
+            // 2 * 768 + 1 = 1537 pixels -> 3 chunks (768, 768, 1).
+            let w = (super::kitty::PIXELS_PER_CHUNK * 2 + 1) as u32;
+            let fb = FrameBuffer::new(w, 1);
+            let bytes = super::kitty::encode(&fb).unwrap();
+            let s = std::str::from_utf8(&bytes).unwrap();
+            // Exactly 3 chunks.
+            assert_eq!(
+                s.matches("\x1b_G").count(),
+                3,
+                "1537-pixel frame must produce exactly 3 chunks"
+            );
+            // First chunk has full controls + m=1.
+            let first_start = s.find("\x1b_G").unwrap() + "\x1b_G".len();
+            let first_end = s.find(';').unwrap();
+            let first_controls = &s[first_start..first_end];
+            assert!(first_controls.contains("a=T"));
+            assert!(first_controls.contains("m=1"));
+            // Find the second chunk (middle one) and assert it
+            // has ONLY m=1 (no full control list).
+            let second_chunk_pos = s.find("\x1b_G").unwrap() + 1; // skip first
+            let second_start =
+                s[second_chunk_pos..].find("\x1b_G").unwrap() + second_chunk_pos + "\x1b_G".len();
+            let second_end = s[second_start..].find(';').unwrap() + second_start;
+            let second_controls = &s[second_start..second_end];
+            assert_eq!(
+                second_controls, "m=1",
+                "intermediate chunk must have only m=1, got {second_controls:?}"
+            );
+            // Last chunk has m=0.
+            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_end = s.rfind(';').unwrap();
+            let last_controls = &s[last_start..last_end];
+            assert_eq!(last_controls, "m=0");
+        });
+    }
+
+    /// Verifies the spec's hard requirement that all chunks
+    /// except the last have a base64 payload length that is a
+    /// multiple of 4. For 32-bit RGBA with 768 pixels per
+    /// chunk, the base64 payload of an intermediate chunk is
+    /// exactly 4096 chars (a multiple of 4). The last chunk
+    /// may have padding and is exempt from this requirement.
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_intermediate_chunks_base64_aligned() {
+        with_env(None, None, None, None, || {
+            // 3 * 768 = 2304 pixels -> 3 chunks, all of size
+            // PIXELS_PER_CHUNK (no last-chunk remainder). This
+            // way ALL three chunks must be 4096-char aligned.
+            let fb = FrameBuffer::new((super::kitty::PIXELS_PER_CHUNK * 3) as u32, 1);
+            let bytes = super::kitty::encode(&fb).unwrap();
+            let s = std::str::from_utf8(&bytes).unwrap();
+            // For each chunk, find the `;` (end of controls)
+            // and the matching `\x1b\\` (end of base64 payload),
+            // and assert the payload length is a multiple of 4.
+            let mut search_from = 0;
+            let mut chunk_idx = 0;
+            while let Some(intro_pos) = s[search_from..].find("\x1b_G") {
+                let abs_intro = search_from + intro_pos;
+                let abs_semicolon = s[abs_intro..].find(';').unwrap() + abs_intro;
+                let abs_end = s[abs_semicolon + 1..].find("\x1b\\").unwrap() + abs_semicolon + 1;
+                let payload_len = abs_end - (abs_semicolon + 1);
+                assert_eq!(
+                    payload_len % 4,
+                    0,
+                    "chunk {chunk_idx} payload length {payload_len} must be multiple of 4 (spec requirement for non-last chunks)"
+                );
+                chunk_idx += 1;
+                search_from = abs_end + "\x1b\\".len();
+            }
+            assert_eq!(chunk_idx, 3, "expected 3 chunks");
+        });
+    }
+
+    /// Determinism: encoding the same frame twice must
+    /// produce byte-identical output (the encode path is
+    /// pure).
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_chunked_is_deterministic() {
+        with_env(None, None, None, None, || {
+            // 1537 pixels -> 3 chunks, exercises the
+            // multi-chunk path.
+            let w = (super::kitty::PIXELS_PER_CHUNK * 2 + 1) as u32;
+            let fb = FrameBuffer::new(w, 1);
+            let a = super::kitty::encode(&fb).unwrap();
+            let b = super::kitty::encode(&fb).unwrap();
+            assert_eq!(a, b, "chunked encode must be deterministic");
         });
     }
 }

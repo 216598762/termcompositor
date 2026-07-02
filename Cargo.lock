@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "dashcompositor"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "icy_sixel",
  "image",

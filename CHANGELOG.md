@@ -1,3 +1,138 @@
+## 0.8.1 (2026-07-02)
+
+Chunked Kitty encoding: for framebuffers whose base64-encoded
+payload exceeds the Kitty graphics protocol's 4096-byte
+per-chunk limit, the Kitty encoder now splits the payload
+into multiple APC commands using the protocol's `m=1` /
+`m=0` chunking mechanism. This lifts the previous implicit
+size limit (a single Kitty command) and supports
+multi-megapixel framebuffers without hitting terminal
+buffer limits. The implementation is fully backwards
+compatible: small framebuffers (those that fit in a single
+4096-byte base64 chunk = 768 RGBA pixels) continue to use
+the v0.8.0 single-command wire format byte-for-byte.
+
+### Added
+- v0.8.1 chunked encoding logic in `kitty::encode` (gated
+  on `kitty-encoder`). The encoder now:
+  1. Computes `total_pixels` from the framebuffer's
+     RGBA byte count.
+  2. If `total_pixels <= 768` (the v0.8.1
+     `PIXELS_PER_CHUNK` constant), emits the v0.8.0
+     single-command format `\x1b_Ga=T,f=32,q=2,s=W,v=H;<base64>\x1b\\`
+     (no `m` key) via a new private
+     `encode_single_chunk` helper. This preserves
+     byte-for-byte compatibility with v0.8.0 for
+     small images.
+  3. If `total_pixels > 768`, enters the multi-chunk
+     path: splits the payload into `768`-pixel
+     chunks and emits one APC per chunk. The first
+     chunk carries the full control list
+     (`a`, `f`, `q`, `s`, `v`) plus `m=1`; intermediate
+     chunks carry ONLY `m=1` (the terminal remembers
+     the metadata from the first chunk per the spec);
+     the last chunk carries `m=0`.
+- `const CHUNK_PAYLOAD_BYTES: usize = 4096` and
+  `const PIXELS_PER_CHUNK: usize = 768` on the
+  `kitty` module. The 4096 limit is the Kitty
+  graphics protocol spec's hard per-chunk limit
+  (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>).
+  The 768-pixel value is derived: 4096 base64 chars
+  decode to 3072 raw bytes = exactly 768 4-byte
+  RGBA pixels, so the base64 encoding of a full
+  intermediate chunk is exactly 4096 chars with no
+  padding (guaranteeing the spec's requirement that
+  non-last chunks have a payload length that is a
+  multiple of 4 base64 chars).
+- Private `build_apc_command(controls, payload)`
+  helper in the `kitty` module. Extracted from the
+  v0.8.0 single-command code path so both the
+  single-chunk fast path and the multi-chunk path
+  share the same per-chunk APC construction
+  (`write_start` + controls + `;` + `write_base64` +
+  `write_end`). This keeps the chunking code DRY
+  and makes the per-chunk format easy to verify in
+  tests.
+- 6 new unit tests in `src/encoder.rs` (gated on
+  `kitty-encoder`), all using `with_env(None, None,
+  None, None, ...)` for env-mutex serialization:
+  - `kitty_encode_single_chunk_produces_no_m_key`:
+     small frame (2x2 = 4 pixels) must use the
+     v0.8.0 wire format (no `m` key, all v0.8.0
+     controls present). Locks in the v0.8.0
+     backwards-compat contract.
+  - `kitty_encode_exactly_768_pixels_is_single_chunk`:
+     boundary case -- 768 pixels exactly still
+     uses the single-chunk fast path (the condition
+     is `<=`, not `<`).
+  - `kitty_encode_two_chunks_has_m1_m0`:
+     769 pixels -> exactly 2 chunks. First chunk
+     has full controls + `m=1`; second chunk has
+     ONLY `m=0` (no full control list).
+  - `kitty_encode_three_chunks_boundary`:
+     1537 pixels -> exactly 3 chunks. Verifies
+     that the middle chunk carries ONLY `m=1`
+     (not the full control list) and the last
+     chunk carries `m=0`.
+  - `kitty_encode_intermediate_chunks_base64_aligned`:
+     2304 pixels (3 * 768, all chunks of equal
+     size) -> every chunk's base64 payload must
+     be a multiple of 4 chars (the spec's hard
+     requirement for non-last chunks). This
+     would catch a regression in the
+     `PIXELS_PER_CHUNK` constant.
+  - `kitty_encode_chunked_is_deterministic`:
+     encoding the same frame twice produces
+     byte-identical output (the encode path is
+     pure, no hidden state).
+
+### Changed
+- `Cargo.toml` version bumped from 0.8.0 to 0.8.1.
+- The v0.5.0 TODO comment in `kitty::encode`
+  ("chunk large images (m=0 more-chunks / m=1
+  last chunk)") has been removed -- the chunking
+  is now implemented in v0.8.1.
+- `kitty::encode` is now slightly more complex
+  (multi-chunk loop) but the per-chunk APC
+  construction is shared via `build_apc_command`,
+  so the net code addition is modest (~50 lines
+  including the chunking loop and the 6 new tests).
+
+### Notes
+- The v0.8.0 single-chunk wire format is preserved
+  byte-for-byte for framebuffers that fit in one
+  chunk. Terminals that pre-date the chunking
+  extension (or that have it disabled) keep
+  working unchanged for small images. The
+  chunked path is only used for framebuffers
+  larger than 768 RGBA pixels (~12 KB raw
+  payload, ~16 KB base64).
+- The v0.8.1 chunked encoder is fully compatible
+  with the v0.8.0 tmux passthrough: the dispatch
+  wraps the entire multi-chunk output (all
+  concatenated APC commands) in a single
+  `wrap_for_tmux` call, so tmux users with
+  `DASHPASSTHROUGH=1` get the chunked output
+  passthrough-wrapped as one passthrough DCS.
+- `cargo build`, `cargo test`, `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and
+  `cargo build --release` are all clean for ALL
+  four feature combinations.
+- Test count per feature combo: default = 26,
+  kitty-encoder alone = 45 (+6 new chunking tests),
+  sixel-encoder alone = 28, both = 47 (+1 doc test).
+  The bump from v0.8.0 (39 / 41) reflects the 6 new
+  v0.8.1 chunking tests.
+- No public API changes; no new runtime
+  dependencies; no new Cargo features.
+- Known limitation: the chunking is hardcoded at
+  4096 base64 bytes (the spec's hard limit). A
+  future v0.8.x could expose this as a
+  configurable encoder option if a particular
+  terminal needs a smaller chunk size for some
+  reason, but no such terminal is known at the
+  time of writing.
+
 ## 0.8.0 (2026-07-02)
 
 tmux passthrough: the Kitty encoder now wraps its APC output in

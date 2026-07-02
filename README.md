@@ -233,6 +233,53 @@ responsibility. See the
 
 [`wrap_for_tmux`]: https://docs.rs/dashcompositor/latest/dashcompositor/fn.wrap_for_tmux.html
 
+
+### Chunked encoding for large images (v0.8.1)
+
+The Kitty graphics protocol caps each APC payload at
+4096 bytes of base64-encoded data. For 32-bit RGBA
+(4 bytes/pixel), that means a single Kitty command
+can carry at most 768 pixels of payload. The v0.8.1
+encoder transparently splits larger framebuffers into
+multiple APC commands using the protocol's `m=1` /
+`m=0` chunking mechanism:
+
+```
+\x1b_Ga=T,f=32,q=2,s=W,v=H,m=1;<chunk1_base64>\x1b\\
+\x1b_Gm=1;<chunk2_base64>\x1b\\
+\x1b_Gm=0;<last_chunk_base64>\x1b\\
+```
+
+The first chunk carries the full control list
+(`a`, `f`, `q`, `s`, `v`) plus `m=1`. Intermediate
+chunks carry only `m=1` (the terminal remembers the
+metadata from the first chunk per the spec). The
+last chunk carries `m=0`.
+
+**Backwards compatibility**: framebuffers that fit
+in a single 4096-byte base64 chunk (≤768 RGBA pixels,
+~12 KB raw payload) continue to use the v0.8.0
+single-command wire format with no `m` key. The
+chunked path is only used for framebuffers larger
+than 768 pixels. This means terminals that pre-date
+the chunking extension keep working unchanged for
+small images.
+
+**v0.8.0 tmux passthrough is preserved**: the
+dispatch wraps the entire multi-chunk output (all
+concatenated APC commands) in a single
+`wrap_for_tmux` call, so tmux users with
+`DASHPASSTHROUGH=1` get the chunked output
+passthrough-wrapped as one passthrough DCS.
+
+**No configuration required**: the chunk size (4096
+base64 bytes) and pixels-per-chunk (768 RGBA pixels)
+are hardcoded constants matching the Kitty spec's
+hard limit. There is no CLI flag or env var to tune
+them; the spec is unambiguous and a configurable
+chunk size would add API surface for no concrete
+benefit.
+
 A custom `Compositor` can be plugged in via `LayerStack::render_with`;
 the default `CpuCompositor` is a zero-dependency reference
 implementation.
