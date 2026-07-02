@@ -1,0 +1,97 @@
+# GitHub Actions CI for `dashcompositor`.
+#
+# Runs the full validation chain on every push to `main` and on every
+# pull request that targets `main`:
+#   - fmt job: `cargo fmt --all -- --check` (workspace-wide, no
+#     features; cheap to run and gates the rest of the pipeline on
+#     the rustfmt contract).
+#   - validate job: 4-way feature matrix (default, kitty-encoder,
+#     sixel-encoder, both) running `cargo build`, `cargo build
+#     --release`, `cargo test`, and `cargo clippy --all-targets
+#     -- -D warnings`. `fail-fast: false` so a single feature
+#     combo's failure does not mask the others.
+#
+# Toolchain: latest stable Rust via `dtolnay/rust-toolchain@stable`
+# (no MSRV is pinned in `Cargo.toml`, so stable is correct). The
+# fmt job installs `rustfmt`; the validate job installs `clippy`.
+#
+# Caching: `Swatinem/rust-cache@v2` keys the cache on `Cargo.lock`
+# + the resolved Rust toolchain version, so the cache is invalidated
+# automatically on dependency or toolchain changes. The `target/`
+# directory is reused across matrix entries, which speeds up the
+# four `cargo build` invocations (each feature combo rebuilds its
+# own subset but shares the deps cache).
+#
+# The `CARGO_TERM_COLOR: always` env makes cargo emit color
+# sequences in the CI log; GitHub Actions renders them.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel outdated PR runs when a new commit is pushed; preserve
+# `main` runs so we can see the history.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
+
+  validate:
+    name: validate (${{ matrix.features || 'default' }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel other matrix entries on first failure -- we want
+      # to see the full picture (e.g. "is the sixel-encoder test
+      # failure also a kitty-encoder test failure?").
+      fail-fast: false
+      matrix:
+        features:
+          - ""                                              # default features
+          - "--features kitty-encoder"                      # v0.5.0 first encoder
+          - "--features sixel-encoder"                      # v0.6.0 second encoder
+          - "--features kitty-encoder,sixel-encoder"        # both encoders
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build
+        run: cargo build ${{ matrix.features }} --verbose
+
+      - name: cargo build --release
+        run: cargo build --release ${{ matrix.features }} --verbose
+
+      - name: cargo test
+        run: cargo test ${{ matrix.features }} --verbose
+
+      - name: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.features }} -- -D warnings --verbose
