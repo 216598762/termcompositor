@@ -1,3 +1,23 @@
+## 0.10.0 (2026-07-02)
+
+API stabilization release: the public API surface is frozen for
+1.0. All pub items have documentation; no breaking changes are
+anticipated before 1.0. Publishing is enabled (`publish = true`).
+
+### Changed
+- `publish = true`: the crate is now ready for crates.io
+  publication. The `publish = false` guard from the v0.1.0
+  scaffold has been removed.
+- Crate root `//!` doc rewritten with a quick-start example,
+  feature-flag table, and module index.
+
+### Notes
+- No API changes, no new features, no new dependencies.
+- All 6 feature combos clean: fmt, build, test, clippy -D
+  warnings.
+- This is the last pre-1.0 minor. The next release will be
+  v1.0.0.
+
 ## 0.9.0 (2026-07-02)
 
 Real font rasterization for `TextLayer`: replaces the solid-block

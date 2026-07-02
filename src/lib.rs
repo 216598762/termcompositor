@@ -1,9 +1,57 @@
-//! `dashcompositor` -- layer-based graphics compositor for the
+//! `dashcompositor` — layer-based graphics compositor for the
 //! terminal.
 //!
+//! Build a [`LayerStack`] of layers ([`SolidColor`], [`RectLayer`],
+//! [`TextLayer`], [`ImageLayer`]), render them into a
+//! [`FrameBuffer`], and encode the result as terminal escape
+//! sequences (Kitty graphics protocol or Sixel) via
+//! [`dispatch_to_writer`].
+//!
+//! # Quick start
+//!
+//! ```
+//! use dashcompositor::{FrameBuffer, LayerStack, SolidColor, TextLayer, detect, dispatch_to_writer};
+//!
+//! let mut stack = LayerStack::new();
+//! stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
+//! stack.push(TextLayer::new(0, 0, "hello", [255; 4]).with_z(10));
+//!
+//! let mut fb = FrameBuffer::new(80, 24);
+//! stack.render(&mut fb);
+//!
+//! // The encode step requires at least one encoder feature
+//! // (`kitty-encoder` or `sixel-encoder`) to produce output;
+//! // without them the dispatch returns UnsupportedProtocol.
+//! # let mut out = Vec::new();
+//! # let _ = dispatch_to_writer(detect(), &fb, &mut out);
+//! ```
+//!
 //! See [`AGENTS.md`](../AGENTS.md) and the
-//! [README](../README.md) for project rules and the target
-//! architecture.
+//! [README](../README.md) for the full architecture.
+//!
+//! ## Feature flags
+//!
+//! | Feature             | Default | Description |
+//! | ------------------- | :-----: | ----------- |
+//! | `font-rasterizer`   | **on**  | Real glyph rasterization in [`TextLayer`] via `fontdue` |
+//! | `kitty-encoder`     |   off   | Kitty graphics protocol encoder |
+//! | `sixel-encoder`     |   off   | Sixel encoder |
+//! | `image-decoder`     |   off   | [`ImageLayer`] (PNG + JPEG) |
+//!
+//! At least one of `kitty-encoder` or `sixel-encoder` is required
+//! to produce terminal output. [`detect`] auto-picks the protocol
+//! based on the host terminal's `TERM` / `TERM_PROGRAM`.
+//!
+//! ## Modules
+//!
+//! | Module | Description |
+//! | ------ | ----------- |
+//! | [`compositor`] | [`LayerStack`], [`Compositor`] trait, [`CpuCompositor`] |
+//! | [`encoder`]   | Protocol detection and encoding (Kitty / Sixel) |
+//! | [`framebuffer`] | [`FrameBuffer`] and [`blend_over`] compositing |
+//! | [`geometry`]  | [`Rect`] primitive |
+//! | [`layer`]     | Layer trait, all built-in layer types |
+//! | [`terminal`]  | [`TerminalSize`] detection |
 
 pub mod compositor;
 pub mod encoder;

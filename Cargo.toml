@@ -1,6 +1,6 @@
 [package]
 name = "dashcompositor"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "Layer-based graphics compositor for the terminal (Kitty graphics protocol / Sixel)"
 license = "MIT"
@@ -9,9 +9,8 @@ readme = "README.md"
 keywords = ["terminal", "compositor", "graphics", "kitty", "sixel"]
 categories = ["graphics", "rendering"]
 authors = ["216598762"]
-# Private early-stage scaffold. Remove this line (or set to `true`) before
-# publishing to crates.io once the library surface stabilises.
-publish = false
+# v0.10.0: stable API surface. Publishing is enabled.
+publish = true
 
 [features]
 # The `image-decoder` feature pulls in the `image` crate so the

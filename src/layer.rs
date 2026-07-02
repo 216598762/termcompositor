@@ -342,12 +342,6 @@ impl TextLayer {
 
     /// Total text advance width in pixels.
     ///
-    /// When the `font-rasterizer` feature is enabled, this sums
-    /// the measured advance widths of each glyph (using the
-    /// lazy-loaded font). Without the feature, returns the number
-    /// of Unicode scalar values (the placeholder width).
-    /// Total text advance width in pixels.
-    ///
     /// When the `font-rasterizer` feature is enabled, this returns
     /// the maximum line width (using measured glyph advance widths).
     /// Without the feature, returns the maximum line length in
