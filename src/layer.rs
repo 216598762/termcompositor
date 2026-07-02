@@ -201,14 +201,49 @@ impl Layer for RectLayer {
     }
 }
 
-/// A text layer placeholder. Owns a UTF-8 string, a position,
-/// and a colour. `render` draws a solid-colour rectangle the
-/// size of the text's bounding box (1 cell high, one cell per
-/// Unicode scalar value wide) as a visible placeholder until a
-/// real glyph rasterizer is wired in. The original text is
-/// available via [`TextLayer::render_glyph`] so callers can
-/// swap in a real font later without changing the public API.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Source of font data for text rendering.
+///
+/// Only available when the `font-rasterizer` Cargo feature is
+/// enabled. The default is [`FontSource::Bundled`], which uses
+/// the compiled-in Fira Mono Regular font (~174KB, SIL OFL
+/// licensed).
+#[cfg(feature = "font-rasterizer")]
+#[derive(Debug, Clone, Default)]
+pub enum FontSource {
+    /// Use the bundled default monospace font (Fira Mono Regular,
+    /// SIL OFL licensed, embedded in the binary at compile time).
+    #[default]
+    Bundled,
+    /// Load a TrueType or OpenType font from the given file path
+    /// at first render. **Panics** if the file does not exist or is
+    /// not a valid TTF/OTF font.
+    Path(std::path::PathBuf),
+    /// Use raw font bytes (TTF/OTF format). The bytes must remain
+    /// valid for the lifetime of the program. **Panics** if the
+    /// bytes are not a valid TTF/OTF font.
+    Bytes(&'static [u8]),
+}
+
+/// Embedded Fira Mono Regular TrueType font data (~174KB, SIL
+/// OFL licensed). Bundled at compile time via `include_bytes!`.
+/// Used as the default font when the `font-rasterizer` feature
+/// is enabled.
+#[cfg(feature = "font-rasterizer")]
+const BUNDLED_FONT_DATA: &[u8] = include_bytes!("../assets/FiraMono-Regular.ttf");
+
+/// A text layer that renders UTF-8 text into the framebuffer
+/// using glyph rasterization.
+///
+/// When the `font-rasterizer` Cargo feature is enabled, text is
+/// rendered using the bundled Fira Mono font (or a custom font
+/// via [`FontSource`]) with per-pixel alpha blending. Without
+/// the feature, text renders as a solid-coloured placeholder
+/// block (one cell per Unicode scalar value) for layout and
+/// z-order verification.
+///
+/// The text content is always available via
+/// [`TextLayer::render_glyph`] regardless of feature flags.
+#[derive(Debug)]
 pub struct TextLayer {
     /// Left edge, inclusive.
     pub x: u32,
@@ -220,11 +255,26 @@ pub struct TextLayer {
     pub color: [u8; 4],
     z: u32,
     name: String,
+    /// Font size in pixels (only used when `font-rasterizer` is
+    /// enabled). Default: 14.0.
+    #[cfg(feature = "font-rasterizer")]
+    font_size: f32,
+    /// Font source (only used when `font-rasterizer` is enabled).
+    /// Default: [`FontSource::Bundled`].
+    #[cfg(feature = "font-rasterizer")]
+    font_source: FontSource,
+    /// Lazily initialised font engine; loaded on the first call
+    /// to [`TextLayer::text_width`] or [`Layer::render`]. The
+    /// bundled font is known-good and will never fail.
+    #[cfg(feature = "font-rasterizer")]
+    font: std::sync::OnceLock<fontdue::Font>,
 }
 
 impl TextLayer {
     /// Creates a new text layer at `(x, y)` with the given
-    /// `text` and RGBA `color`.
+    /// `text` and RGBA `color`. Uses the bundled Fira Mono font
+    /// at 14px when the `font-rasterizer` feature is enabled;
+    /// falls back to the solid-block placeholder otherwise.
     pub fn new(x: u32, y: u32, text: impl Into<String>, color: [u8; 4]) -> Self {
         let text = text.into();
         Self {
@@ -234,6 +284,12 @@ impl TextLayer {
             color,
             z: 0,
             name: "TextLayer".to_owned(),
+            #[cfg(feature = "font-rasterizer")]
+            font_size: 14.0,
+            #[cfg(feature = "font-rasterizer")]
+            font_source: FontSource::Bundled,
+            #[cfg(feature = "font-rasterizer")]
+            font: std::sync::OnceLock::new(),
         }
     }
 
@@ -251,18 +307,90 @@ impl TextLayer {
         self
     }
 
-    /// Placeholder glyph-rendering entry point. Returns the
-    /// underlying text content unchanged. A future font-backed
-    /// implementation will use this to drive glyph lookup.
+    /// Returns the text content.
     pub fn render_glyph(&self) -> &str {
         &self.text
     }
 
-    /// Estimated text width in cells (one cell per Unicode
-    /// scalar value). A real font will refine this with
-    /// measured advance widths.
+    /// The font size in pixels (only meaningful when the
+    /// `font-rasterizer` feature is enabled). Default: 14.0.
+    #[cfg(feature = "font-rasterizer")]
+    pub fn font_size(&self) -> f32 {
+        self.font_size
+    }
+
+    /// Builder: sets a custom font source and pixel size.
+    /// Only available when the `font-rasterizer` feature is
+    /// enabled.
+    #[cfg(feature = "font-rasterizer")]
+    #[must_use]
+    pub fn with_font(mut self, source: FontSource, px_size: f32) -> Self {
+        self.font_source = source;
+        self.font_size = px_size;
+        self
+    }
+
+    /// Builder: sets the font pixel size (e.g. 14.0, 18.0, 24.0).
+    /// Uses the current font source. Only available when the
+    /// `font-rasterizer` feature is enabled.
+    #[cfg(feature = "font-rasterizer")]
+    #[must_use]
+    pub fn with_font_size(mut self, px_size: f32) -> Self {
+        self.font_size = px_size;
+        self
+    }
+
+    /// Total text advance width in pixels.
+    ///
+    /// When the `font-rasterizer` feature is enabled, this sums
+    /// the measured advance widths of each glyph (using the
+    /// lazy-loaded font). Without the feature, returns the number
+    /// of Unicode scalar values (the placeholder width).
     pub fn text_width(&self) -> u32 {
-        self.text.chars().count() as u32
+        #[cfg(feature = "font-rasterizer")]
+        {
+            let font = self.ensure_font();
+            self.text
+                .chars()
+                .map(|ch| {
+                    let glyph_idx = font.lookup_glyph_index(ch);
+                    let (metrics, _) = font.rasterize_indexed(glyph_idx, self.font_size);
+                    metrics.advance_width as u32
+                })
+                .sum()
+        }
+        #[cfg(not(feature = "font-rasterizer"))]
+        {
+            self.text.chars().count() as u32
+        }
+    }
+
+    /// Ensures the font is loaded (lazy initialisation). Returns
+    /// a reference to the [`fontdue::Font`].
+    #[cfg(feature = "font-rasterizer")]
+    fn ensure_font(&self) -> &fontdue::Font {
+        self.font.get_or_init(|| {
+            let bytes: &[u8] = match &self.font_source {
+                FontSource::Bundled => BUNDLED_FONT_DATA,
+                FontSource::Path(path) => {
+                    // Reading on first render; the caller is
+                    // responsible for ensuring the font file
+                    // is accessible.
+                    &std::fs::read(path)
+                        .expect("font-rasterizer: failed to read font file")
+                }
+                FontSource::Bytes(b) => b,
+            };
+            fontdue::Font::from_bytes(
+                bytes,
+                fontdue::FontSettings {
+                    collection_index: 0,
+                    scale: self.font_size,
+                    load_substitutions: true,
+                },
+            )
+            .expect("font-rasterizer: embedded font data is valid")
+        })
     }
 }
 
@@ -276,14 +404,99 @@ impl Layer for TextLayer {
     }
 
     fn bounds(&self) -> Option<Rect> {
-        Some(Rect::new(self.x, self.y, self.text_width(), 1))
+        #[cfg(feature = "font-rasterizer")]
+        {
+            let w = self.text_width();
+            let h = self.font_size as u32;
+            Some(Rect::new(self.x, self.y, w.max(1), h.max(1)))
+        }
+        #[cfg(not(feature = "font-rasterizer"))]
+        {
+            Some(Rect::new(self.x, self.y, self.text_width(), 1))
+        }
     }
 
     fn render(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
-        // Placeholder: render as a solid rectangle the size of
-        // the text's bounding box (1 cell high, 1 cell per char
-        // wide) so layout and z-order are visually verifiable
-        // without a real font.
+        #[cfg(feature = "font-rasterizer")]
+        {
+            self.render_with_font(target, offset, opacity);
+        }
+        #[cfg(not(feature = "font-rasterizer"))]
+        {
+            self.render_placeholder(target, offset, opacity);
+        }
+    }
+}
+
+#[cfg(feature = "font-rasterizer")]
+impl TextLayer {
+    /// Actual glyph-rasterizing render path. Called when the
+    /// `font-rasterizer` feature is enabled.
+    fn render_with_font(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
+        let font = self.ensure_font();
+        let ox = self.x.saturating_add(offset.0);
+        let oy = self.y.saturating_add(offset.1);
+        let effective = (f32::from(self.color[3]) / 255.0 * opacity).clamp(0.0, 1.0);
+
+        // Approximate the baseline at ~85% of font size below
+        // the top of the line, which is a reasonable heuristic
+        // for most Latin monospace fonts.
+        let baseline_y = oy.saturating_add((self.font_size * 0.85) as u32) as i32;
+        let mut cursor_x = ox as i32;
+
+        for ch in self.text.chars() {
+            if ch == '\n' {
+                cursor_x = ox as i32;
+                continue;
+            }
+            if ch == ' ' {
+                // Space: use the font's actual space advance width,
+                // even though the glyph bitmap is empty.
+                let glyph_idx = font.lookup_glyph_index(ch);
+                let (metrics, _) = font.rasterize_indexed(glyph_idx, self.font_size);
+                cursor_x += metrics.advance_width as i32;
+                continue;
+            }
+
+            let glyph_idx = font.lookup_glyph_index(ch);
+            let (metrics, alpha) = font.rasterize_indexed(glyph_idx, self.font_size);
+
+            // Position the glyph bitmap. fontdue's ymin is the
+            // y-offset from the baseline to the top of the bitmap
+            // in screen coordinates (positive = below baseline,
+            // negative = above).
+            let glyph_x = cursor_x + metrics.xmin;
+            let glyph_y = baseline_y + metrics.ymin;
+
+            for gy in 0..metrics.height {
+                for gx in 0..metrics.width {
+                    let px = glyph_x + gx as i32;
+                    let py = glyph_y + gy as i32;
+                    if px < 0 || py < 0 {
+                        continue;
+                    }
+                    let alpha_val = alpha[gy * metrics.width + gx];
+                    if alpha_val == 0 {
+                        continue;
+                    }
+                    let glyph_alpha = f32::from(alpha_val) / 255.0 * effective;
+                    if let Some(dst) = target.get_pixel_mut(px as u32, py as u32) {
+                        crate::framebuffer::blend_over(dst, &self.color, glyph_alpha);
+                    }
+                }
+            }
+
+            cursor_x += metrics.advance_width as i32;
+        }
+    }
+}
+
+#[cfg(not(feature = "font-rasterizer"))]
+impl TextLayer {
+    /// Placeholder render path: draws a solid-colour block one
+    /// cell per Unicode scalar value high and 1 pixel tall.
+    /// Used when the `font-rasterizer` feature is disabled.
+    fn render_placeholder(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
         let ox = self.x.saturating_add(offset.0);
         let oy = self.y.saturating_add(offset.1);
         let effective = (f32::from(self.color[3]) / 255.0 * opacity).clamp(0.0, 1.0);
@@ -654,6 +867,29 @@ mod tests {
     }
 
     #[test]
+    fn text_layer_builders() {
+        let t = TextLayer::new(0, 0, "x", [0, 0, 0, 255])
+            .with_z(3)
+            .with_name("label");
+        assert_eq!(t.z_order(), 3);
+        assert_eq!(t.name(), "label");
+    }
+
+    #[test]
+    fn text_layer_render_glyph_returns_text() {
+        let t = TextLayer::new(0, 0, "placeholder", [0, 0, 0, 255]);
+        assert_eq!(t.render_glyph(), "placeholder");
+    }
+
+    // -- Placeholder-path tests (font-rasterizer feature OFF) -----
+    //
+    // Without the font-rasterizer feature, TextLayer uses the
+    // solid-block placeholder: text_width returns char count,
+    // bounds is (x, y, char_count, 1), and render draws a solid
+    // block.
+
+    #[cfg(not(feature = "font-rasterizer"))]
+    #[test]
     fn text_layer_new_defaults() {
         let t = TextLayer::new(1, 2, "hi", [10, 20, 30, 255]);
         assert_eq!(t.x, 1);
@@ -664,27 +900,14 @@ mod tests {
         assert_eq!(t.text_width(), 2);
     }
 
-    #[test]
-    fn text_layer_builders() {
-        let t = TextLayer::new(0, 0, "x", [0, 0, 0, 255])
-            .with_z(3)
-            .with_name("label");
-        assert_eq!(t.z_order(), 3);
-        assert_eq!(t.name(), "label");
-    }
-
+    #[cfg(not(feature = "font-rasterizer"))]
     #[test]
     fn text_layer_bounds_one_cell_per_char() {
         let t = TextLayer::new(2, 3, "hello", [0, 0, 0, 255]);
         assert_eq!(t.bounds(), Some(Rect::new(2, 3, 5, 1)));
     }
 
-    #[test]
-    fn text_layer_render_glyph_returns_text() {
-        let t = TextLayer::new(0, 0, "placeholder", [0, 0, 0, 255]);
-        assert_eq!(t.render_glyph(), "placeholder");
-    }
-
+    #[cfg(not(feature = "font-rasterizer"))]
     #[test]
     fn text_layer_render_draws_colored_block() {
         let t = TextLayer::new(1, 1, "abc", [0, 0, 255, 255]);
@@ -698,6 +921,7 @@ mod tests {
         assert_eq!(fb.get_pixel(4, 1), Some(&[0, 0, 0, 0]));
     }
 
+    #[cfg(not(feature = "font-rasterizer"))]
     #[test]
     fn text_layer_text_width_handles_unicode() {
         // 'x' is 1 char; '日本語' is 3 chars.
@@ -705,6 +929,70 @@ mod tests {
         let b = TextLayer::new(0, 0, "\u{65e5}\u{672c}\u{8a9e}", [0, 0, 0, 255]);
         assert_eq!(a.text_width(), 1);
         assert_eq!(b.text_width(), 3);
+    }
+
+    // -- Font-rasterizer-path tests (font-rasterizer feature ON) --
+    //
+    // With the feature enabled, text_width returns measured
+    // advance widths, bounds reflects the pixel-accurate size,
+    // and render draws real glyph bitmaps.
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn text_layer_new_defaults_with_font() {
+        let t = TextLayer::new(1, 2, "hi", [10, 20, 30, 255]);
+        assert_eq!(t.x, 1);
+        assert_eq!(t.y, 2);
+        assert_eq!(t.text, "hi");
+        assert_eq!(t.color, [10, 20, 30, 255]);
+        assert_eq!(t.z_order(), 0);
+        assert_eq!(t.font_size(), 14.0);
+        // text_width should return measured advance width (not 2).
+        assert!(t.text_width() > 0);
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn text_layer_bounds_with_font_uses_font_size() {
+        let t = TextLayer::new(0, 0, "ab", [0, 0, 0, 255]).with_font_size(14.0);
+        let b = t.bounds().unwrap();
+        // Width should be at least some positive advance sum.
+        assert!(b.width >= 2);
+        // Height should be approx font_size.
+        assert_eq!(b.height, 14);
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn text_layer_font_source_defaults_to_bundled() {
+        let t = TextLayer::new(0, 0, "test", [255; 4]);
+        // Lazy load happens on text_width or render; calling
+        // text_width verifies the bundled font loads correctly.
+        assert!(t.text_width() > 0, "bundled font must load and produce positive width");
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn text_layer_render_produces_non_empty_bitmap() {
+        let t = TextLayer::new(0, 0, "A", [200, 100, 50, 255]).with_font_size(14.0);
+        let mut fb = FrameBuffer::new(20, 20);
+        t.render(&mut fb, (0, 0), 1.0);
+        // The letter 'A' at (0,0) with 14px Fira Mono should
+        // produce at least some non-transparent pixels in the
+        // expected area.
+        let has_glyph_pixels = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_glyph_pixels, "font rasterizer should render non-transparent pixels");
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn text_layer_with_font_size_changes_width() {
+        let small = TextLayer::new(0, 0, "hello", [255; 4]).with_font_size(10.0);
+        let large = TextLayer::new(0, 0, "hello", [255; 4]).with_font_size(20.0);
+        assert!(
+            large.text_width() >= small.text_width(),
+            "larger font size should produce >= advance width"
+        );
     }
 
     #[test]

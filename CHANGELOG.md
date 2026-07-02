@@ -1,3 +1,91 @@
+## 0.9.0 (2026-07-02)
+
+Real font rasterization for `TextLayer`: replaces the solid-block
+placeholder with actual glyph rendering via the `fontdue` crate
+(optional `font-rasterizer` Cargo feature). When enabled, text
+is rendered using a bundled Fira Mono Regular font (~174KB, SIL
+OFL licensed) with per-pixel alpha blending, measured advance
+widths, and pixel-accurate bounding boxes. The feature is
+optional (default off) and the solid-block placeholder is
+preserved when disabled, maintaining backwards compatibility.
+
+This is the first v0.9.x release and the most impactful step
+toward 1.0 — it turns `TextLayer` from a coloured-block layout
+probe into a real text renderer.
+
+### Added
+- `fontdue = "0.9"` as an optional dependency (MIT/Apache-2.0/Zlib
+  licensed), gated behind the new `font-rasterizer` Cargo feature.
+- `dashcompositor::FontSource` enum (gated on `font-rasterizer`):
+  `Bundled` (default), `Path(PathBuf)`, or `Bytes(&'static [u8])`.
+  The bundled font is Fira Mono Regular, embedded at compile time
+  via `include_bytes!`.
+- `TextLayer::with_font(FontSource, f32)` builder:
+  sets a custom font source and pixel size (e.g.
+  `.with_font(FontSource::Bundled, 18.0)`).
+- `TextLayer::with_font_size(f32)` builder:
+  sets only the pixel size, keeping the current font source.
+- `TextLayer::font_size() -> f32` accessor (returns the current
+  font size, default 14.0).
+- Bundled font asset: `assets/FiraMono-Regular.ttf` (~174KB).
+
+### Changed
+- `TextLayer` no longer derives `Clone`, `PartialEq`, or `Eq`.
+  Only `Debug` is derived (consistent with `ImageLayer`).
+- `TextLayer::text_width()` when `font-rasterizer` is enabled
+  now returns the sum of measured glyph advance widths in pixels
+  (instead of the Unicode scalar value count). The char-count
+  fallback is preserved when the feature is disabled.
+- `TextLayer::bounds()` when `font-rasterizer` is enabled now
+  returns `(x, y, text_width, font_size)` for pixel-accurate
+  bounding. Without the feature, returns `(x, y, char_count, 1)`
+  as before.
+- `TextLayer::render()` when `font-rasterizer` is enabled now
+  composites real glyph bitmaps from fontdue into the framebuffer
+  with per-pixel alpha blending. The solid-block placeholder is
+  preserved as the fallback render path.
+
+### Backwards compatibility
+- `TextLayer::new(x, y, text, color)` is unchanged; uses the
+  bundled font at 14px when the feature is enabled, or the
+  placeholder when disabled.
+- `render_glyph() -> &str` is unchanged.
+- `with_z` and `with_name` builders are unchanged.
+- Default features remain empty (`font-rasterizer` is opt-in).
+
+### Tests
+- 5 new font-rasterizer tests (gated on `font-rasterizer`):
+  `text_layer_new_defaults_with_font` (font_size == 14.0,
+  text_width > 0); `text_layer_bounds_with_font_uses_font_size`
+  (bounds height == font_size);
+  `text_layer_font_source_defaults_to_bundled` (bundled font
+  loads and produces positive width);
+  `text_layer_render_produces_non_empty_bitmap` (letter 'A'
+  renders at least some non-transparent pixels);
+  `text_layer_with_font_size_changes_width` (larger font size
+  produces >= advance width).
+- 4 existing placeholder tests preserved (gated on
+  `not(feature = "font-rasterizer")`).
+- `end_to_end_rect_and_text_layers` in lib.rs updated to work
+  with both feature configurations.
+
+### Notes
+- All feature combinations clean: cargo fmt, cargo build
+  (default + each feature + both + font-rasterizer alone +
+  font-rasterizer + both encoders), cargo test, cargo clippy
+  --all-targets -- -D warnings.
+- Binary size impact: ~174KB increase from the bundled font
+  (only when `font-rasterizer` is enabled).
+- The `FontSource::Path` variant reads the font file on first
+  render (not on construction), so a missing file panics at
+  render time.
+- Fira Mono is SIL OFL licensed (see `assets/OFL.txt` or
+  https://github.com/mozilla/Fira for the full license text).
+
+The font-rasterizer work follows the AGENTS.md §3 evaluation:
+`fontdue` was chosen over `ab_glyph` (requires PBF font format
+conversion) and `cosmic-text` (heavier shaping pipeline).
+
 ## 0.8.6 (2026-07-02)
 
 End-to-end O(1) streaming dispatch: adds a new

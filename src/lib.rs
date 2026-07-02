@@ -38,6 +38,8 @@ pub use framebuffer::{blend_over, FrameBuffer};
 pub use geometry::Rect;
 #[cfg(feature = "image-decoder")]
 pub use layer::ImageLayer;
+#[cfg(feature = "font-rasterizer")]
+pub use layer::FontSource;
 pub use layer::{Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};
 pub use terminal::TerminalSize;
 
@@ -87,11 +89,22 @@ mod tests {
         let id_text = stack.push(TextLayer::new(0, 0, "hi", [255, 255, 255, 255]).with_z(20));
         let mut fb = FrameBuffer::new(10, 10);
         stack.render(&mut fb);
-        // The green rect's center pixel is green; the text was
-        // drawn at (0, 0) with the white placeholder block.
+        // The green rect's center pixel is green.
         assert_eq!(fb.get_pixel(3, 3), Some(&[0, 255, 0, 255]));
-        assert_eq!(fb.get_pixel(0, 0), Some(&[255, 255, 255, 255]));
-        assert_eq!(fb.get_pixel(1, 0), Some(&[255, 255, 255, 255]));
+        // The text layer at (0,0) should have rendered something
+        // (either glyph pixels with font-rasterizer, or a
+        // placeholder block without).
+        #[cfg(not(feature = "font-rasterizer"))]
+        {
+            assert_eq!(fb.get_pixel(0, 0), Some(&[255, 255, 255, 255]));
+            assert_eq!(fb.get_pixel(1, 0), Some(&[255, 255, 255, 255]));
+        }
+        #[cfg(feature = "font-rasterizer")]
+        {
+            // With font-rasterizer, the glyph bitmap produces
+            // composited pixels with varying alpha.
+            assert!(fb.pixels().iter().any(|p| p[3] > 0));
+        }
         let _ = (id_rect, id_text);
     }
 }

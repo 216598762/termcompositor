@@ -77,7 +77,7 @@ are provided:
 | ----------- | :-----------: | -------------------------------------- |
 | `SolidColor`| no (fills)    | Single RGBA colour, fills whole target |
 | `RectLayer` | yes           | RGBA solid at `(x, y)` of `width x height` |
-| `TextLayer` | yes           | Placeholder; renders a coloured block, exposes `render_glyph()` for a future font rasterizer |
+| `TextLayer` | yes           | Real glyph rasterization via `fontdue` when the `font-rasterizer` feature is enabled; solid-block placeholder otherwise. Exposes `render_glyph()` and configurable `FontSource` (Bundled / Path / Bytes) |
 | `ImageLayer`| yes (optional) | Decodes PNG / JPEG via the `image` crate (gated on the `image-decoder` feature) |
 
 ```rust
@@ -97,8 +97,9 @@ let rect = stack.push(
         .with_name("centered-rect"),
 );
 
-// Text placeholder (will be swapped for a real glyph rasterizer
-// later; for now it draws a colored block the size of the text).
+// Text rendered with real glyph rasterization (fontdue) when the
+// `font-rasterizer` feature is enabled; solid-block placeholder
+// otherwise. Uses bundled Fira Mono font at 14px by default.
 let label = stack.push(
     TextLayer::new(2, 1, "dashcompositor", [255, 255, 255, 255])
         .with_z(20)
@@ -135,11 +136,12 @@ let id = stack.push(img);
 
 ### Optional feature flags
 
-| Feature          | Default | Pulls in          | Enables                        |
-| ---------------- | :-----: | ----------------- | ------------------------------ |
-| `sixel-encoder`   |   off   | `icy_sixel = "0.5"`    | `Protocol::Sixel` produces real Sixel DCS escape sequences  |
-| `kitty-encoder`   |   off   | `little-kitty = "0.0.3"` | `Protocol::Kitty` produces real Kitty escape sequences |
-| `image-decoder`  |   off   | `image = "0.25"`  | `ImageLayer` (PNG + JPEG)      |
+| Feature             | Default | Pulls in               | Enables                                      |
+| ------------------- | :-----: | ---------------------- | -------------------------------------------- |
+| `sixel-encoder`     |   off   | `icy_sixel = "0.5"`   | `Protocol::Sixel` produces real Sixel DCS escape sequences |
+| `kitty-encoder`     |   off   | `little-kitty = "0.0.3"` | `Protocol::Kitty` produces real Kitty escape sequences |
+| `image-decoder`     |   off   | `image = "0.25"`       | `ImageLayer` (PNG + JPEG)                    |
+| `font-rasterizer`   |   off   | `fontdue = "0.9"`     | Real glyph rasterization in `TextLayer` via bundled Fira Mono font |
 
 ### Auto-detect protocol
 
