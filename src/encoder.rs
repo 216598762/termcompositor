@@ -515,17 +515,56 @@ mod kitty {
     /// at the exact chunk boundary).
     pub(crate) const PIXELS_PER_CHUNK: usize = 768;
 
-    /// Encodes `frame` as one or more Kitty "transmit and
-    /// display" APC commands and writes the concatenated
-    /// APC bytes to `out`. **v0.8.2 memory-bounded
-    /// streaming path**: never materialises the full
-    /// framebuffer in a `Vec<u8>`; the only per-call
-    /// allocations are one scratch `Vec<u8>` per chunk
-    /// (≤ 3072 raw RGBA bytes = one chunk's worth, plus
-    /// the chunk's APC framing ≈ 4KB). Peak working set is
-    /// O(1) regardless of framebuffer size, so this
-    /// function is safe to call on multi-megapixel
-    /// framebuffers without spiking memory.
+    /// Stable image ID used by the single-framebuffer
+    /// compositor use case. Kitty replaces the image at this
+    /// ID on each retransmit, so the place command only needs
+    /// to be issued once per frame (after the transmission).
+    pub(crate) const IMAGE_ID: u32 = 1;
+
+    /// Builds the Kitty "place image" APC command for
+    /// [`IMAGE_ID`]. Places the image at the current cursor
+    /// position with no cell-grid snap and `z=-1` so the image
+    /// renders *behind* the cell body.
+    fn build_place_apc() -> Vec<u8> {
+        let mut out = Vec::with_capacity(20);
+        out.extend_from_slice(b"\x1b_Ga=p,i=1,z=-1\x1b\\");
+        out
+    }
+
+    /// Builds the Kitty "delete image" APC command for
+    /// [`IMAGE_ID`]. Deletes the image from Kitty's image
+    /// store and all of its placements in one shot. Used by
+    /// the v0.12.2 transparency short-circuit in
+    /// [`encode_to_writer`] to clear any previously-placed
+    /// image without transmitting 4MB+ of zero-RGBA data
+    /// every tick.
+    fn build_delete_apc() -> Vec<u8> {
+        let mut out = Vec::with_capacity(20);
+        out.extend_from_slice(b"\x1b_Ga=d,d=I,i=1\x1b\\");
+        out
+    }
+
+    /// Encodes `frame` as one or more Kitty "transmit"
+    /// (`a=T`) APC commands followed by a single Kitty
+    /// "place" (`a=p`) command, and writes the concatenated
+    /// APC bytes to `out`. **v0.8.2 memory-bounded streaming
+    /// path**: never materialises the full framebuffer in a
+    /// `Vec<u8>`; the only per-call allocations are one
+    /// scratch `Vec<u8>` per chunk (≤ 3072 raw RGBA bytes =
+    /// one chunk's worth, plus the chunk's APC framing ≈
+    /// 4KB) plus the two small APC command Vecs (place, 20
+    /// bytes; delete, 20 bytes). Peak working set is O(1)
+    /// regardless of framebuffer size.
+    ///
+    /// **v0.12.2 split**: the wire format is now a two-step
+    /// Kitty dance per frame: (1) one or more `a=T,i=1`
+    /// transmit commands that upload the RGBA payload to
+    /// Kitty's image-store slot 1, then (2) a single
+    /// `a=p,i=1,z=-1` place command that makes the uploaded
+    /// image visible at the current cursor position, behind
+    /// the cell grid. Prior to v0.12.2 the encoder only
+    /// emitted the transmit step, which left the image in
+    /// Kitty's image-store but never displayed it.
     ///
     /// Callers that want a `Vec<u8>` of the output (e.g.
     /// the v0.7.0/v0.8.0 API) can call [`encode`] (which
@@ -562,6 +601,19 @@ mod kitty {
             });
         }
 
+        // v0.12.2 transparency short-circuit: when the layer
+        // stack is empty (no child PTY has emitted a Kitty
+        // graphics command since startup), the framebuffer is
+        // fully transparent. Streaming 4MB+ of zero-RGBA data
+        // every tick is wasteful AND clutters Kitty's image
+        // store with invisible entries. Instead, emit a single
+        // 18-byte Kitty delete command to clear any previously-
+        // placed image and return.
+        if frame.is_fully_transparent() {
+            out.write_all(&build_delete_apc())?;
+            return Ok(());
+        }
+
         let width = frame.width();
         let height = frame.height();
         let pixels = frame.pixels();
@@ -576,6 +628,10 @@ mod kitty {
         if total_pixels <= PIXELS_PER_CHUNK {
             let chunk_apc = encode_single_chunk_apc(width, height, pixels)?;
             out.write_all(&chunk_apc)?;
+            // v0.12.2: emit the place command so the uploaded
+            // image is actually displayed (not just stored in
+            // Kitty's image-store).
+            out.write_all(&build_place_apc())?;
             return Ok(());
         }
 
@@ -612,6 +668,10 @@ mod kitty {
                     ('a', ControlValue::Char('T')),
                     ('f', ControlValue::UnsignedInteger(32)),
                     ('q', ControlValue::UnsignedInteger(2)),
+                    // v0.12.2: stable image ID so Kitty
+                    // replaces the image at slot 1 on each
+                    // retransmit (no image-store leak).
+                    ('i', ControlValue::UnsignedInteger(IMAGE_ID)),
                     ('s', ControlValue::UnsignedInteger(width)),
                     ('v', ControlValue::UnsignedInteger(height)),
                     ('m', ControlValue::UnsignedInteger(m_value)),
@@ -623,6 +683,11 @@ mod kitty {
             let chunk_apc = build_apc_command(&controls, &chunk_rgba)?;
             out.write_all(&chunk_apc)?;
         }
+
+        // v0.12.2: emit the place command so the uploaded
+        // image is actually displayed (not just stored in
+        // Kitty's image-store).
+        out.write_all(&build_place_apc())?;
         Ok(())
     }
 
@@ -692,6 +757,9 @@ mod kitty {
             ('a', ControlValue::Char('T')),
             ('f', ControlValue::UnsignedInteger(32)),
             ('q', ControlValue::UnsignedInteger(2)),
+            // v0.12.2: stable image ID so Kitty replaces
+            // the image at slot 1 on each retransmit.
+            ('i', ControlValue::UnsignedInteger(IMAGE_ID)),
             ('s', ControlValue::UnsignedInteger(width)),
             ('v', ControlValue::UnsignedInteger(height)),
         ];
@@ -2271,7 +2339,8 @@ mod tests {
     #[test]
     fn kitty_encode_single_chunk_produces_no_m_key() {
         with_env(None, None, None, None, || {
-            let fb = FrameBuffer::new(2, 2);
+            let mut fb = FrameBuffer::new(2, 2);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             // Starts with the APC introducer and ends with the
             // APC terminator (existing v0.8.0 framing).
@@ -2304,7 +2373,8 @@ mod tests {
         with_env(None, None, None, None, || {
             // 768 * 1 = 768 pixels, single row. Width*height
             // is exactly PIXELS_PER_CHUNK.
-            let fb = FrameBuffer::new(super::kitty::PIXELS_PER_CHUNK as u32, 1);
+            let mut fb = FrameBuffer::new(super::kitty::PIXELS_PER_CHUNK as u32, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             let payload_start = "\x1b_G".len();
@@ -2328,14 +2398,15 @@ mod tests {
     fn kitty_encode_two_chunks_has_m1_m0() {
         with_env(None, None, None, None, || {
             let w = super::kitty::PIXELS_PER_CHUNK as u32 + 1; // 769
-            let fb = FrameBuffer::new(w, 1);
+            let mut fb = FrameBuffer::new(w, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // Count APC introducers (each chunk starts with
             // `\x1b_G`). Should be exactly 2.
             let introducer_count = s.matches("\x1b_G").count();
             assert_eq!(
-                introducer_count, 2,
+                introducer_count, 3,
                 "769-pixel frame must produce exactly 2 chunks, got {introducer_count}"
             );
             // First chunk has `m=1` and the full control list.
@@ -2350,7 +2421,7 @@ mod tests {
             );
             assert!(first_controls.contains("m=1"), "first chunk must have m=1");
             // Second chunk has `m=0` and ONLY `m`.
-            let second_chunk_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let second_chunk_start = s.rfind("\x1b_Gm=0").unwrap() + "\x1b_G".len();
             let second_chunk_end = s.rfind(';').unwrap();
             let second_controls = &s[second_chunk_start..second_chunk_end];
             assert_eq!(second_controls, "m=0", "second chunk must have only m=0");
@@ -2366,13 +2437,14 @@ mod tests {
         with_env(None, None, None, None, || {
             // 2 * 768 + 1 = 1537 pixels -> 3 chunks (768, 768, 1).
             let w = (super::kitty::PIXELS_PER_CHUNK * 2 + 1) as u32;
-            let fb = FrameBuffer::new(w, 1);
+            let mut fb = FrameBuffer::new(w, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // Exactly 3 chunks.
             assert_eq!(
                 s.matches("\x1b_G").count(),
-                3,
+                4,
                 "1537-pixel frame must produce exactly 3 chunks"
             );
             // First chunk has full controls + m=1.
@@ -2393,7 +2465,7 @@ mod tests {
                 "intermediate chunk must have only m=1, got {second_controls:?}"
             );
             // Last chunk has m=0.
-            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_start = s.rfind("\x1b_Gm=0").unwrap() + "\x1b_G".len();
             let last_end = s.rfind(';').unwrap();
             let last_controls = &s[last_start..last_end];
             assert_eq!(last_controls, "m=0");
@@ -2413,7 +2485,8 @@ mod tests {
             // 3 * 768 = 2304 pixels -> 3 chunks, all of size
             // PIXELS_PER_CHUNK (no last-chunk remainder). This
             // way ALL three chunks must be 4096-char aligned.
-            let fb = FrameBuffer::new((super::kitty::PIXELS_PER_CHUNK * 3) as u32, 1);
+            let mut fb = FrameBuffer::new((super::kitty::PIXELS_PER_CHUNK * 3) as u32, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // For each chunk, find the `;` (end of controls)
@@ -2423,7 +2496,18 @@ mod tests {
             let mut chunk_idx = 0;
             while let Some(intro_pos) = s[search_from..].find("\x1b_G") {
                 let abs_intro = search_from + intro_pos;
-                let abs_semicolon = s[abs_intro..].find(';').unwrap() + abs_intro;
+                // v0.12.2: skip the place command (no ';' separator).
+                let abs_semicolon = match s[abs_intro..].find(';') {
+                    Some(pos) => abs_intro + pos,
+                    None => {
+                        search_from = s[abs_intro..]
+                            .find("\x1b\\")
+                            .unwrap()
+                            + abs_intro
+                            + "\x1b\\".len();
+                        continue;
+                    }
+                };
                 let abs_end = s[abs_semicolon + 1..].find("\x1b\\").unwrap() + abs_semicolon + 1;
                 let payload_len = abs_end - (abs_semicolon + 1);
                 assert_eq!(
@@ -2495,12 +2579,13 @@ mod tests {
     fn encode_to_writer_single_chunk_no_m_key() {
         with_env(None, None, None, None, || {
             // Exactly 768 pixels = single chunk boundary.
-            let fb = FrameBuffer::new(768, 1);
+            let mut fb = FrameBuffer::new(768, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
             // One APC introducer (single chunk).
-            assert_eq!(s.matches("\x1b_G").count(), 1);
+            assert_eq!(s.matches("\x1b_G").count(), 2);
             let payload_start = "\x1b_G".len();
             let payload_end = s.find(';').unwrap();
             let controls = &s[payload_start..payload_end];
@@ -2524,12 +2609,13 @@ mod tests {
     fn encode_to_writer_multi_chunk_has_m_keys() {
         with_env(None, None, None, None, || {
             // 1537 pixels -> 3 chunks (768 + 768 + 1).
-            let fb = FrameBuffer::new(1537, 1);
+            let mut fb = FrameBuffer::new(1537, 1);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
             // 3 chunks.
-            assert_eq!(s.matches("\x1b_G").count(), 3);
+            assert_eq!(s.matches("\x1b_G").count(), 4);
             // First chunk: full controls + m=1.
             let first_end = s.find(';').unwrap();
             let first_controls = &s["\x1b_G".len()..first_end];
@@ -2543,7 +2629,7 @@ mod tests {
             let second_controls = &s[second_start..second_end];
             assert_eq!(second_controls, "m=1");
             // Last chunk: m=0.
-            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_start = s.rfind("\x1b_Gm=0").unwrap() + "\x1b_G".len();
             let last_end = s.rfind(';').unwrap();
             let last_controls = &s[last_start..last_end];
             assert_eq!(last_controls, "m=0");
@@ -2593,7 +2679,8 @@ mod tests {
         with_env(None, None, None, None, || {
             let w: u32 = 1920;
             let h: u32 = 1080;
-            let fb = FrameBuffer::new(w, h);
+            let mut fb = FrameBuffer::new(w, h);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
@@ -2603,7 +2690,7 @@ mod tests {
                 .div_ceil(super::kitty::PIXELS_PER_CHUNK);
             assert_eq!(
                 s.matches("\x1b_G").count(),
-                expected_chunks,
+                expected_chunks + 1,
                 "1920x1080 frame must produce {expected_chunks} chunks"
             );
             // First chunk: full controls + m=1.
@@ -2613,7 +2700,7 @@ mod tests {
             assert!(first_controls.contains("v=1080"));
             assert!(first_controls.contains("m=1"));
             // Last chunk: m=0.
-            let last_start = s.rfind("\x1b_G").unwrap() + "\x1b_G".len();
+            let last_start = s.rfind("\x1b_Gm=0").unwrap() + "\x1b_G".len();
             let last_end = s.rfind(';').unwrap();
             let last_controls = &s[last_start..last_end];
             assert_eq!(last_controls, "m=0");
@@ -3190,5 +3277,54 @@ mod tests {
         assert_eq!(err, EncoderError::UnsupportedProtocol("sixel"));
         assert!(out.is_empty());
     }
+
+    // -- v0.12.2 place-command + transparency short-circuit tests --
+
+    /// v0.12.2: a non-transparent framebuffer must produce
+    /// BOTH a transmit command (`a=T`) and a place command
+    /// (`a=p,i=1,z=-1`).
+    #[test]
+    fn encode_to_writer_emits_place_command_after_transmission() {
+        let mut fb = FrameBuffer::new(2, 2);
+        fb.pixels_mut()[0] = [255, 0, 0, 255];
+        let mut out = Vec::new();
+        super::kitty::encode_to_writer(&fb, &mut out).unwrap();
+        let output = std::str::from_utf8(&out).expect("non-UTF8 output");
+        assert!(output.contains("a=T"), "transmit command missing: {:?}", output);
+        assert!(output.contains("a=p,i=1,z=-1"), "place command missing: {:?}", output);
+        let transmit_pos = output.find("a=T").unwrap();
+        let place_pos = output.find("a=p,i=1,z=-1").unwrap();
+        assert!(place_pos > transmit_pos, "place must come after transmit; transmit at {} place at {}: {:?}", transmit_pos, place_pos, output);
+    }
+
+    /// v0.12.2: a fully-transparent framebuffer must
+    /// short-circuit to a single delete command (`a=d`).
+    #[test]
+    fn encode_to_writer_fully_transparent_framebuffer_emits_delete_only() {
+        let fb = FrameBuffer::new(100, 100);
+        assert!(fb.is_fully_transparent());
+        let mut out = Vec::new();
+        super::kitty::encode_to_writer(&fb, &mut out).unwrap();
+        let output = std::str::from_utf8(&out).expect("non-UTF8 output");
+        assert!(output.contains("a=d,d=I,i=1"), "delete command missing: {:?}", output);
+        assert!(!output.contains("a=T"), "transmit must NOT be emitted for transparent framebuffer: {:?}", output);
+        assert!(out.len() < 64, "short-circuit output should be <64 bytes, got {} bytes: {:?}", out.len(), output);
+    }
+
+    /// v0.12.2: the FrameBuffer::is_fully_transparent
+    /// predicate correctly distinguishes empty from
+    /// non-empty framebuffers.
+    #[test]
+    fn framebuffer_is_fully_transparent_predicate() {
+        let empty = FrameBuffer::new(10, 10);
+        assert!(empty.is_fully_transparent());
+        let mut one_pixel = FrameBuffer::new(10, 10);
+        one_pixel.pixels_mut()[0] = [0, 0, 0, 1];
+        assert!(!one_pixel.is_fully_transparent());
+        let mut opaque = FrameBuffer::new(10, 10);
+        opaque.pixels_mut()[5] = [255, 255, 255, 255];
+        assert!(!opaque.is_fully_transparent());
+    }
+
 
 }

@@ -77,6 +77,23 @@ impl FrameBuffer {
         }
     }
 
+    /// Returns `true` if every pixel is fully transparent
+    /// (`[0, 0, 0, 0]`). Used by the Kitty encoder to short-
+    /// circuit the transmission when the layer stack is empty
+    /// (no child PTY has emitted a Kitty graphics command) --
+    /// instead of streaming 4MB+ of zero-RGBA chunks every
+    /// tick, the encoder emits a single Kitty delete command
+    /// (`a=d,d=I,i=1`) to clear any previously-placed image
+    /// and returns immediately.
+    ///
+    /// O(n) over `pixels.len()`. For a 2MP framebuffer
+    /// (~2,000,000 pixels) this is a single cache-friendly
+    /// pass over ~8MB of memory, which completes in well
+    /// under a millisecond on modern hardware.
+    pub fn is_fully_transparent(&self) -> bool {
+        self.pixels.iter().all(|px| *px == [0, 0, 0, 0])
+    }
+
     /// Returns a shared reference to the pixel at `(x, y)`, or
     /// `None` if `(x, y)` is outside the framebuffer. Free
     /// bounds-checking for layers that may draw partially
