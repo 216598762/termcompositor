@@ -418,4 +418,98 @@ mod tests {
         assert_eq!(fb.width() as u16, reported.cols);
         assert_eq!(fb.height() as u16, reported.rows);
     }
+
+    #[test]
+    fn entries_returns_all_in_stack_order() {
+        let mut s = LayerStack::new();
+        let a = s.push(SolidColor::new(1, 0, 0, 255).with_name("a"));
+        let b = s.push(SolidColor::new(0, 1, 0, 255).with_name("b"));
+        let entries = s.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id(), a);
+        assert_eq!(entries[1].id(), b);
+    }
+
+    #[test]
+    fn entries_mut_allows_modifying_entries() {
+        let mut s = LayerStack::new();
+        let _ = s.push(SolidColor::new(0, 0, 0, 255));
+        let _ = s.push(SolidColor::new(0, 0, 0, 255));
+        // Use entries_mut to set the first entry invisible
+        // and the second entry to a custom name.
+        s.entries_mut()[0].set_visible(false);
+        s.entries_mut()[1].set_name("second");
+        assert!(!s.entries()[0].is_visible());
+        assert_eq!(s.entries()[1].name(), "second");
+    }
+
+    #[test]
+    fn default_creates_empty_stack() {
+        let s = LayerStack::default();
+        assert!(s.is_empty());
+        assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn default_push_starts_at_zero() {
+        let mut s = LayerStack::default();
+        let id = s.push(SolidColor::new(0, 0, 0, 255));
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn reorder_missing_id_is_noop() {
+        let mut s = LayerStack::new();
+        let a = s.push(SolidColor::new(0, 0, 0, 255));
+        let b = s.push(SolidColor::new(0, 0, 0, 255));
+        // Reorder a non-existent id — should be a no-op.
+        s.reorder(999, 0);
+        // Stack unchanged.
+        assert_eq!(s.index_of(a), Some(0));
+        assert_eq!(s.index_of(b), Some(1));
+    }
+
+    #[test]
+    fn reorder_to_same_index_is_stable() {
+        let mut s = LayerStack::new();
+        let a = s.push(SolidColor::new(0, 0, 0, 255));
+        let _b = s.push(SolidColor::new(0, 0, 0, 255));
+        // Move 'a' from index 0 to index 0 — no change.
+        s.reorder(a, 0);
+        assert_eq!(s.index_of(a), Some(0));
+    }
+
+    #[test]
+    fn reorder_to_last_index() {
+        let mut s = LayerStack::new();
+        let a = s.push(SolidColor::new(0, 0, 0, 255));
+        let b = s.push(SolidColor::new(0, 0, 0, 255));
+        let c = s.push(SolidColor::new(0, 0, 0, 255));
+        // Move 'a' to end (index 3 == len()).
+        s.reorder(a, 3);
+        assert_eq!(s.index_of(a), Some(2));
+        assert_eq!(s.index_of(b), Some(0));
+        assert_eq!(s.index_of(c), Some(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "reorder index 2 out of bounds (len = 1)")]
+    fn reorder_past_end_panics() {
+        let mut s = LayerStack::new();
+        let a = s.push(SolidColor::new(0, 0, 0, 255));
+        // index 2 > len (1) — should panic.
+        s.reorder(a, 2);
+    }
+
+    #[test]
+    fn entries_empty_stack() {
+        let s = LayerStack::new();
+        assert!(s.entries().is_empty());
+    }
+
+    #[test]
+    fn entries_mut_empty_stack() {
+        let mut s = LayerStack::new();
+        assert!(s.entries_mut().is_empty());
+    }
 }

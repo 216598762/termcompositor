@@ -1096,6 +1096,63 @@ mod tests {
         assert_eq!(b.height, 3);
     }
 
+    // -- FontSource::Bytes tests (font-rasterizer ON) ------------
+    //
+    // These exercise the FontSource::Bytes variant of
+    // ensure_font, which takes a &'static [u8] TTF/OTF blob
+    // and rasterises glyphs from it.
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn font_source_bytes_loads_and_produces_width() {
+        use super::FontSource;
+        // Use the bundled Fira Mono font as a FontSource::Bytes blob.
+        let t = TextLayer::new(0, 0, "abc", [255; 4])
+            .with_font(FontSource::Bytes(super::BUNDLED_FONT_DATA), 16.0);
+        // text_width triggers ensure_font, which must parse the
+        // TTF bytes and return a valid fontdue::Font.
+        let w = t.text_width();
+        assert!(w > 0, "FontSource::Bytes must produce positive width, got {w}");
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn font_source_bytes_render_produces_glyph_pixels() {
+        use super::FontSource;
+        let t = TextLayer::new(0, 0, "B", [200, 50, 50, 255])
+            .with_font(FontSource::Bytes(super::BUNDLED_FONT_DATA), 18.0);
+        let mut fb = FrameBuffer::new(30, 30);
+        t.render(&mut fb, (0, 0), 1.0);
+        let has_pixels = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_pixels, "FontSource::Bytes render must produce non-transparent pixels");
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn font_source_bytes_matches_bundled_width() {
+        use super::FontSource;
+        // FontSource::Bytes and FontSource::Bundled should produce
+        // identical widths when using the same underlying font data.
+        let via_bytes = TextLayer::new(0, 0, "hello world", [255; 4])
+            .with_font(FontSource::Bytes(super::BUNDLED_FONT_DATA), 14.0);
+        let via_bundled = TextLayer::new(0, 0, "hello world", [255; 4])
+            .with_font(FontSource::Bundled, 14.0);
+        assert_eq!(via_bytes.text_width(), via_bundled.text_width());
+    }
+
+    #[cfg(feature = "font-rasterizer")]
+    #[test]
+    fn font_source_bytes_bounds_reflects_font_size() {
+        use super::FontSource;
+        let t = TextLayer::new(5, 10, "X", [255; 4])
+            .with_font(FontSource::Bytes(super::BUNDLED_FONT_DATA), 20.0);
+        let b = t.bounds().unwrap();
+        assert_eq!(b.x, 5);
+        assert_eq!(b.y, 10);
+        assert!(b.width > 0, "bounds width must be positive");
+        assert_eq!(b.height, 20, "bounds height must equal font_size");
+    }
+
     #[test]
     fn layer_entry_opacity_clamps() {
         let e = LayerEntry::new(0, Box::new(SolidColor::new(0, 0, 0, 255)));
@@ -1234,5 +1291,110 @@ mod image_layer_tests {
         for px in fb.pixels() {
             assert_eq!(*px, [0, 0, 0, 0]);
         }
+    }
+
+    // -- from_path tests (require filesystem I/O) ----------------
+    //
+    // These tests exercise ImageLayer::from_path, which reads a
+    // PNG/JPEG file from disk. We create a tiny temp file, write
+    // a 1x1 red PNG to it, then call from_path.
+
+    /// Helper: write a small RGBA image to a temp PNG file and
+    /// return the path. The file is deleted when the TempDir
+    /// guard is dropped.
+    fn write_temp_png(
+        img: &image::DynamicImage,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = dir.path().join("test_image.png");
+        img.write_to(
+            &mut std::fs::File::create(&path).expect("failed to create temp file"),
+            image::ImageFormat::Png,
+        )
+        .expect("failed to write PNG");
+        (dir, path)
+    }
+
+    #[test]
+    fn image_layer_from_path_loads_png() {
+        let img = red_pixel_image();
+        let (_dir, path) = write_temp_png(&img);
+
+        let result = ImageLayer::from_path(&path, 5, 10);
+        assert!(result.is_ok(), "from_path must succeed: {:?}", result.err());
+        let layer = result.unwrap();
+        assert_eq!(layer.width(), 1);
+        assert_eq!(layer.height(), 1);
+        assert_eq!(layer.x, 5);
+        assert_eq!(layer.y, 10);
+    }
+
+    #[test]
+    fn image_layer_from_path_render_writes_pixel() {
+        let img = red_pixel_image();
+        let (_dir, path) = write_temp_png(&img);
+
+        let layer = ImageLayer::from_path(&path, 2, 3).unwrap();
+        let mut fb = FrameBuffer::new(5, 5);
+        layer.render(&mut fb, (0, 0), 1.0);
+        assert_eq!(fb.get_pixel(2, 3), Some(&[255, 0, 0, 255]));
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn image_layer_from_path_with_offset() {
+        let img = red_pixel_image();
+        let (_dir, path) = write_temp_png(&img);
+
+        let layer = ImageLayer::from_path(&path, 0, 0).unwrap();
+        let mut fb = FrameBuffer::new(5, 5);
+        layer.render(&mut fb, (3, 4), 1.0);
+        assert_eq!(fb.get_pixel(3, 4), Some(&[255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn image_layer_from_path_nonexistent_returns_error() {
+        let result = ImageLayer::from_path("/nonexistent/path/test.png", 0, 0);
+        assert!(result.is_err(), "from_path with nonexistent file must fail");
+        let err = result.unwrap_err();
+        // The error should be a NotFound or similar IO error.
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("not found") || err_str.contains("No such file") || err_str.contains("os error"),
+            "error should mention file not found: {err_str}"
+        );
+    }
+
+    #[test]
+    fn image_layer_from_path_invalid_format_returns_error() {
+        // Write random bytes to a file — not a valid PNG.
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = dir.path().join("invalid.png");
+        std::fs::write(&path, b"not a real png file").expect("failed to write");
+
+        let result = ImageLayer::from_path(&path, 0, 0);
+        assert!(result.is_err(), "from_path with invalid file must fail");
+    }
+
+    #[test]
+    fn image_layer_from_path_bounds_reports_position() {
+        let img = red_pixel_image();
+        let (_dir, path) = write_temp_png(&img);
+
+        let layer = ImageLayer::from_path(&path, 10, 20).unwrap();
+        assert_eq!(layer.bounds(), Some(Rect::new(10, 20, 1, 1)));
+    }
+
+    #[test]
+    fn image_layer_from_path_z_order_and_name() {
+        let img = red_pixel_image();
+        let (_dir, path) = write_temp_png(&img);
+
+        let layer = ImageLayer::from_path(&path, 0, 0)
+            .unwrap()
+            .with_z(5)
+            .with_name("test-img");
+        assert_eq!(layer.z_order(), 5);
+        assert_eq!(layer.name(), "test-img");
     }
 }

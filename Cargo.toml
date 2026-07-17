@@ -73,6 +73,9 @@ fontdue = { version = "0.9", optional = true }
 # 3-Clause, ~25K downloads on crates.io, actively maintained).
 # Used for the compositor benchmarks in `benches/`.
 criterion = { version = "0.5", default-features = false }
+# tempfile is used by the ImageLayer::from_path tests to create
+# temporary PNG files on disk.
+tempfile = "3"
 
 [[bench]]
 name = "compositor"
