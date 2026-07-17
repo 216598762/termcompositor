@@ -429,4 +429,91 @@ mod tests {
         // The label (3rd layer, index 2) should have opacity 0.9
         assert_eq!(stack.entries()[2].opacity(), 0.9);
     }
+
+    // ── DashPassthroughGuard ──────────────────────────────────
+
+    /// Helper: ensure the DASHPASSTHROUGH env var is absent before
+    /// and after the test. DashPassthroughGuard::drop handles the
+    /// "after" part for the guard's own saved state.
+    fn ensure_dashpassthrough_absent() {
+        let _ = std::env::remove_var("DASHPASSTHROUGH");
+    }
+
+    #[test]
+    fn guard_set_some_sets_env_var() {
+        ensure_dashpassthrough_absent();
+        {
+            let _guard = DashPassthroughGuard::set(Some("1"));
+            assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "1");
+        }
+        // Guard dropped — env var should be removed (was absent before).
+        assert!(std::env::var("DASHPASSTHROUGH").is_err());
+    }
+
+    #[test]
+    fn guard_set_none_removes_env_var() {
+        ensure_dashpassthrough_absent();
+        // Pre-set the var so we can verify set(None) removes it.
+        std::env::set_var("DASHPASSTHROUGH", "existing");
+        {
+            let _guard = DashPassthroughGuard::set(None);
+            assert!(std::env::var("DASHPASSTHROUGH").is_err());
+        }
+        // Guard dropped — should restore the original value.
+        assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "existing");
+    }
+
+    #[test]
+    fn guard_set_some_restores_previous_value() {
+        ensure_dashpassthrough_absent();
+        std::env::set_var("DASHPASSTHROUGH", "old");
+        {
+            let _guard = DashPassthroughGuard::set(Some("new"));
+            assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "new");
+        }
+        // Guard dropped — should restore "old".
+        assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "old");
+        let _ = std::env::remove_var("DASHPASSTHROUGH");
+    }
+
+    #[test]
+    fn guard_drop_removes_var_when_absent_before() {
+        ensure_dashpassthrough_absent();
+        {
+            let _guard = DashPassthroughGuard::set(Some("1"));
+            assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "1");
+        }
+        // Guard dropped — should remove the var entirely.
+        assert!(std::env::var("DASHPASSTHROUGH").is_err());
+    }
+
+    #[test]
+    fn guard_nested_guards_restore_correctly() {
+        ensure_dashpassthrough_absent();
+        std::env::set_var("DASHPASSTHROUGH", "original");
+        {
+            let _outer = DashPassthroughGuard::set(Some("outer"));
+            assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "outer");
+            {
+                let _inner = DashPassthroughGuard::set(Some("inner"));
+                assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "inner");
+            }
+            // Inner guard dropped — should restore "outer".
+            assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "outer");
+        }
+        // Outer guard dropped — should restore "original".
+        assert_eq!(std::env::var("DASHPASSTHROUGH").unwrap(), "original");
+        let _ = std::env::remove_var("DASHPASSTHROUGH");
+    }
+
+    #[test]
+    fn guard_set_none_when_absent_leaves_absent() {
+        ensure_dashpassthrough_absent();
+        {
+            let _guard = DashPassthroughGuard::set(None);
+            assert!(std::env::var("DASHPASSTHROUGH").is_err());
+        }
+        // Guard dropped — was absent before, should remain absent.
+        assert!(std::env::var("DASHPASSTHROUGH").is_err());
+    }
 }
