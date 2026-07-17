@@ -549,4 +549,34 @@ mod tests {
         // invariants guarantee it: should_exit && redraw_requested ⇒
         // render_and_encode(&ctx, …) is called before break.
     }
+
+    #[test]
+    fn anim_context_exit_without_redraw_skips_render() {
+        let stack = LayerStack::new();
+        let mut frames_seen = Vec::new();
+        let mut exit_called = false;
+        let mut redraw_called = false;
+
+        run_with_stack(stack, 1000.0, |ctx| {
+            frames_seen.push(ctx.frame_count());
+            if ctx.frame_count() == 2 {
+                // Exit WITHOUT requesting a redraw.
+                ctx.exit();
+                exit_called = true;
+            } else {
+                // Only redraw on non-exit frames.
+                ctx.request_redraw();
+                redraw_called = true;
+            }
+        });
+
+        // The callback ran for frames 0, 1, 2.
+        assert_eq!(frames_seen, vec![0, 1, 2]);
+        assert!(exit_called, "exit() should have been called");
+        // request_redraw() was called on frames 0 and 1 (the non-exit
+        // frames), but NOT on frame 2.  The loop invariant guarantees:
+        // should_exit && !redraw_requested ⇒ render_and_encode is NOT
+        // called, so the final frame was not rendered.
+        assert!(redraw_called, "request_redraw should have been called on non-exit frames");
+    }
 }
