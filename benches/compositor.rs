@@ -1,4 +1,4 @@
-//! Benchmarks for the `dashcompositor` compositor core.
+//! Benchmarks for the `termcompositor` compositor core.
 //!
 //! Measures throughput of framebuffer operations, layer rendering,
 //! and (when the relevant Cargo features are enabled) text glyph
@@ -24,7 +24,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 // -- Framebuffer benchmarks -----------------------------------------
 
 fn bench_framebuffer_new(c: &mut Criterion) {
-    use dashcompositor::FrameBuffer;
+    use termcompositor::FrameBuffer;
 
     c.bench_function("framebuffer/new_80x24", |b| {
         b.iter(|| FrameBuffer::new(black_box(80), black_box(24)))
@@ -36,14 +36,14 @@ fn bench_framebuffer_new(c: &mut Criterion) {
 }
 
 fn bench_framebuffer_clear(c: &mut Criterion) {
-    use dashcompositor::FrameBuffer;
+    use termcompositor::FrameBuffer;
 
     let mut fb = FrameBuffer::new(800, 600);
     c.bench_function("framebuffer/clear_800x600", |b| b.iter(|| fb.clear()));
 }
 
 fn bench_blend_over(c: &mut Criterion) {
-    use dashcompositor::blend_over;
+    use termcompositor::blend_over;
 
     let src = [200, 100, 50, 200];
     c.bench_function("framebuffer/blend_over_opaque", |b| {
@@ -72,7 +72,7 @@ fn bench_blend_over(c: &mut Criterion) {
 }
 
 fn bench_framebuffer_get_pixel(c: &mut Criterion) {
-    use dashcompositor::FrameBuffer;
+    use termcompositor::FrameBuffer;
 
     let fb = FrameBuffer::new(800, 600);
     c.bench_function("framebuffer/get_pixel_in_bounds", |b| {
@@ -87,7 +87,7 @@ fn bench_framebuffer_get_pixel(c: &mut Criterion) {
 // -- Layer benchmarks ------------------------------------------------
 
 fn bench_solid_color_render(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, Layer, SolidColor};
+    use termcompositor::{FrameBuffer, Layer, SolidColor};
 
     let layer = SolidColor::new(100, 150, 200, 255);
     let mut fb = FrameBuffer::new(800, 600);
@@ -102,7 +102,7 @@ fn bench_solid_color_render(c: &mut Criterion) {
 }
 
 fn bench_rect_layer_render(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, Layer, RectLayer};
+    use termcompositor::{FrameBuffer, Layer, RectLayer};
 
     let layer = RectLayer::new(100, 50, 600, 500, [0, 255, 0, 200]);
     let mut fb = FrameBuffer::new(800, 600);
@@ -117,7 +117,7 @@ fn bench_rect_layer_render(c: &mut Criterion) {
 }
 
 fn bench_rect_layer_small(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, Layer, RectLayer};
+    use termcompositor::{FrameBuffer, Layer, RectLayer};
 
     let layer = RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255]);
     let mut fb = FrameBuffer::new(100, 100);
@@ -130,7 +130,7 @@ fn bench_rect_layer_small(c: &mut Criterion) {
 // -- LayerStack compositor benchmarks ---
 
 fn bench_layerstack_empty_render(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, LayerStack};
+    use termcompositor::{FrameBuffer, LayerStack};
 
     let stack = LayerStack::new();
     let mut fb = FrameBuffer::new(800, 600);
@@ -141,7 +141,7 @@ fn bench_layerstack_empty_render(c: &mut Criterion) {
 }
 
 fn bench_layerstack_single_solid(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, LayerStack, SolidColor};
+    use termcompositor::{FrameBuffer, LayerStack, SolidColor};
 
     let mut stack = LayerStack::new();
     stack.push(SolidColor::new(0, 64, 128, 255));
@@ -153,7 +153,7 @@ fn bench_layerstack_single_solid(c: &mut Criterion) {
 }
 
 fn bench_layerstack_multi_layer(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, LayerStack, RectLayer, SolidColor, TextLayer};
+    use termcompositor::{FrameBuffer, LayerStack, RectLayer, SolidColor, TextLayer};
 
     let mut stack = LayerStack::new();
     stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
@@ -181,7 +181,7 @@ fn bench_layerstack_multi_layer(c: &mut Criterion) {
 }
 
 fn bench_layerstack_many_rects(c: &mut Criterion) {
-    use dashcompositor::{FrameBuffer, LayerStack, RectLayer, SolidColor};
+    use termcompositor::{FrameBuffer, LayerStack, RectLayer, SolidColor};
 
     let mut stack = LayerStack::new();
     stack.push(SolidColor::new(0, 0, 0, 255).with_name("bg"));
@@ -208,7 +208,7 @@ fn bench_layerstack_many_rects(c: &mut Criterion) {
 #[cfg(feature = "font-rasterizer")]
 mod text_benches {
     use super::*;
-    use dashcompositor::{FrameBuffer, Layer, TextLayer};
+    use termcompositor::{FrameBuffer, Layer, TextLayer};
 
     pub fn bench_text_layer_text_width(c: &mut Criterion) {
         let short = TextLayer::new(0, 0, "Hello, world!", [255; 4]);
@@ -258,7 +258,7 @@ mod text_benches {
 #[cfg(feature = "kitty-encoder")]
 mod kitty_benches {
     use super::*;
-    use dashcompositor::{FrameBuffer, Protocol};
+    use termcompositor::{FrameBuffer, Protocol};
 
     pub fn bench_kitty_encode(c: &mut Criterion) {
         let small = FrameBuffer::new(80, 24);
@@ -267,7 +267,7 @@ mod kitty_benches {
         c.bench_function("encoder/kitty_small_80x24", |b| {
             b.iter(|| {
                 let mut out = Vec::with_capacity(4096);
-                dashcompositor::encoder::dispatch_to_writer(
+                termcompositor::encoder::dispatch_to_writer(
                     Protocol::Kitty,
                     black_box(&small),
                     black_box(&mut out),
@@ -279,7 +279,7 @@ mod kitty_benches {
         c.bench_function("encoder/kitty_medium_800x600", |b| {
             b.iter(|| {
                 let mut out = Vec::new();
-                dashcompositor::encoder::dispatch_to_writer(
+                termcompositor::encoder::dispatch_to_writer(
                     Protocol::Kitty,
                     black_box(&medium),
                     black_box(&mut out),
@@ -298,7 +298,7 @@ mod kitty_benches {
 #[cfg(feature = "sixel-encoder")]
 mod sixel_benches {
     use super::*;
-    use dashcompositor::{FrameBuffer, Protocol};
+    use termcompositor::{FrameBuffer, Protocol};
 
     pub fn bench_sixel_encode(c: &mut Criterion) {
         let small = FrameBuffer::new(80, 24);
@@ -307,7 +307,7 @@ mod sixel_benches {
         c.bench_function("encoder/sixel_small_80x24", |b| {
             b.iter(|| {
                 let mut out = Vec::new();
-                dashcompositor::encoder::dispatch_to_writer(
+                termcompositor::encoder::dispatch_to_writer(
                     Protocol::Sixel,
                     black_box(&small),
                     black_box(&mut out),
@@ -319,7 +319,7 @@ mod sixel_benches {
         c.bench_function("encoder/sixel_medium_800x600", |b| {
             b.iter(|| {
                 let mut out = Vec::new();
-                dashcompositor::encoder::dispatch_to_writer(
+                termcompositor::encoder::dispatch_to_writer(
                     Protocol::Sixel,
                     black_box(&medium),
                     black_box(&mut out),

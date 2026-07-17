@@ -10,7 +10,7 @@
 //! - `wrap_for_tmux()` / `wrap_for_tmux_to_writer()`
 //! - `encode_passthrough_to_writer()`
 
-use dashcompositor::{
+use termcompositor::{
     dispatch_to_writer, detect, FrameBuffer, LayerStack, Protocol, ProtocolEncoder, RectLayer,
     SolidColor, TextLayer,
 };
@@ -315,7 +315,7 @@ mod tmux_passthrough {
     #[test]
     fn wrap_for_tmux_doubles_esc_bytes() {
         let inner = b"\x1b_Gtest\x1b\\";
-        let wrapped = dashcompositor::wrap_for_tmux(inner.to_vec());
+        let wrapped = termcompositor::wrap_for_tmux(inner.to_vec());
 
         // Wrapped output starts with the tmux DCS prefix.
         assert!(
@@ -338,10 +338,10 @@ mod tmux_passthrough {
     #[test]
     fn wrap_for_tmux_round_trip_identity() {
         let inner = b"\x1b_Ga=T,f=32;\x1b\\";
-        let vec_result = dashcompositor::wrap_for_tmux(inner.to_vec());
+        let vec_result = termcompositor::wrap_for_tmux(inner.to_vec());
 
         let mut writer_result = Vec::new();
-        dashcompositor::wrap_for_tmux_to_writer(inner, &mut writer_result).unwrap();
+        termcompositor::wrap_for_tmux_to_writer(inner, &mut writer_result).unwrap();
 
         assert_eq!(
             vec_result, writer_result,
@@ -361,7 +361,7 @@ mod tmux_passthrough {
         let raw = Protocol::Kitty.encode(&fb).unwrap();
 
         let mut auto_out = Vec::new();
-        dashcompositor::encode_passthrough_to_writer(&fb, &mut auto_out).unwrap();
+        termcompositor::encode_passthrough_to_writer(&fb, &mut auto_out).unwrap();
 
         assert_eq!(
             auto_out, raw,
@@ -371,7 +371,7 @@ mod tmux_passthrough {
 
     #[test]
     fn passthrough_writer_wraps_when_env_set() {
-        use dashcompositor::PassthroughWriter;
+        use termcompositor::PassthroughWriter;
 
         let inner = b"hello world";
         let mut buf = Vec::new();
@@ -404,7 +404,7 @@ mod error_paths {
         // Build without enabling the specific protocol feature
         // is hard to test, but we can verify the error type exists
         // and the Display impl works.
-        let err = dashcompositor::EncoderError::UnsupportedProtocol("test");
+        let err = termcompositor::EncoderError::UnsupportedProtocol("test");
         assert_eq!(
             err.to_string(),
             "protocol test is not supported in this build"
@@ -413,7 +413,7 @@ mod error_paths {
 
     #[test]
     fn invalid_dimensions_error_display() {
-        let err = dashcompositor::EncoderError::InvalidDimensions {
+        let err = termcompositor::EncoderError::InvalidDimensions {
             width: 0,
             height: 10,
         };
@@ -425,7 +425,7 @@ mod error_paths {
 
     #[test]
     fn encode_error_display() {
-        let err = dashcompositor::EncoderError::Encode("something broke".into());
+        let err = termcompositor::EncoderError::Encode("something broke".into());
         assert_eq!(
             err.to_string(),
             "encoder failed: something broke"

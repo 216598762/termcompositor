@@ -18,7 +18,7 @@ use crate::terminal::TerminalSize;
 /// # Example
 ///
 /// ```
-/// use dashcompositor::{Compositor, FrameBuffer, LayerStack, SolidColor};
+/// use termcompositor::{Compositor, FrameBuffer, LayerStack, SolidColor};
 ///
 /// /// A custom compositor that renders layers in reverse stack order.
 /// struct ReverseCompositor;
@@ -57,7 +57,7 @@ pub trait Compositor {
 /// # Example
 ///
 /// ```
-/// use dashcompositor::{Compositor, CpuCompositor, FrameBuffer, LayerStack, SolidColor};
+/// use termcompositor::{Compositor, CpuCompositor, FrameBuffer, LayerStack, SolidColor};
 ///
 /// let mut stack = LayerStack::new();
 /// let bg = stack.push(SolidColor::new(10, 20, 30, 255).with_z(0));
@@ -91,7 +91,7 @@ impl Compositor for CpuCompositor {
 /// # Example
 ///
 /// ```no_run
-/// use dashcompositor::{FrameBuffer, LayerStack, SolidColor};
+/// use termcompositor::{FrameBuffer, LayerStack, SolidColor};
 ///
 /// let mut stack = LayerStack::new();
 /// let bg = stack.push(SolidColor::new(0, 0, 0, 255).with_name("bg"));
@@ -217,7 +217,7 @@ impl LayerStack {
     /// # Example
     ///
     /// ```
-    /// use dashcompositor::{LayerStack, SolidColor};
+    /// use termcompositor::{LayerStack, SolidColor};
     ///
     /// let mut stack = LayerStack::new();
     /// stack.push(SolidColor::new(0, 0, 0, 255));
@@ -236,7 +236,7 @@ impl LayerStack {
     /// # Example
     ///
     /// ```
-    /// use dashcompositor::{FrameBuffer, LayerStack, SolidColor};
+    /// use termcompositor::{FrameBuffer, LayerStack, SolidColor};
     ///
     /// let mut stack = LayerStack::new();
     /// stack.push(SolidColor::new(0, 128, 0, 255));

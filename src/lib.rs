@@ -1,4 +1,4 @@
-//! `dashcompositor` — layer-based graphics compositor for the
+//! `termcompositor` — layer-based graphics compositor for the
 //! terminal.
 //!
 //! Build a [`LayerStack`] of layers ([`SolidColor`], [`RectLayer`],
@@ -10,7 +10,7 @@
 //! # Quick start
 //!
 //! ```
-//! use dashcompositor::{FrameBuffer, LayerStack, SolidColor, TextLayer, detect, dispatch_to_writer};
+//! use termcompositor::{FrameBuffer, LayerStack, SolidColor, TextLayer, detect, dispatch_to_writer};
 //!
 //! let mut stack = LayerStack::new();
 //! stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
@@ -73,9 +73,9 @@ pub use encoder::PassthroughWriter;
 pub use encoder::encode_passthrough_to_writer;
 // NOTE: the v0.8.4 `sixel::encode_to_writer` is re-exported
 // at the `encoder` module level (see
-// `dashcompositor::encoder::encode_to_writer`) but NOT at
+// `termcompositor::encoder::encode_to_writer`) but NOT at
 // the crate root, to mirror the kitty `encode_to_writer`
-// access pattern (`dashcompositor::encoder::kitty::encode_to_writer`).
+// access pattern (`termcompositor::encoder::kitty::encode_to_writer`).
 // Neither streaming entry point is at the crate root: a
 // single crate-root `encode_to_writer` name would be
 // ambiguous in a build with both `kitty-encoder` and

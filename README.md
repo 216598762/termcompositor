@@ -1,4 +1,4 @@
-# dashcompositor
+# termcompositor
 
 A **layer-based graphics compositor for the terminal**, written in Rust.
 
@@ -7,7 +7,7 @@ images), render them into an off-screen RGBA framebuffer, and project the
 result to your terminal via the Kitty graphics protocol or Sixel.
 
 It is a **rendering pipeline**, not a terminal emulator: no TTY management,
-no shell input. You build a frame, `dashcompositor` encodes it.
+no shell input. You build a frame, `termcompositor` encodes it.
 
 ## Architecture (one line)
 

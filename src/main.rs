@@ -1,19 +1,19 @@
-//! `dashcompositor` CLI -- terminal-fit layer-stack + auto-detect
+//! `termcompositor` CLI -- terminal-fit layer-stack + auto-detect
 //! protocol encoder demo.
 //!
 //! Demonstrates that a backend (this binary) can:
 //! 1. Detect the host terminal's cell-grid size via
-//!    [`dashcompositor::TerminalSize`].
-//! 2. Build a [`dashcompositor::LayerStack`], add and remove
-//!    layers (full-frame [`dashcompositor::SolidColor`],
-//!    positioned [`dashcompositor::RectLayer`], and
-//!    [`dashcompositor::TextLayer`] placeholder), and control
+//!    [`termcompositor::TerminalSize`].
+//! 2. Build a [`termcompositor::LayerStack`], add and remove
+//!    layers (full-frame [`termcompositor::SolidColor`],
+//!    positioned [`termcompositor::RectLayer`], and
+//!    [`termcompositor::TextLayer`] placeholder), and control
 //!    their opacity / visibility / z-order override.
 //! 3. Render the stack into a framebuffer auto-sized to the
 //!    terminal via
-//!    [`dashcompositor::LayerStack::render_to_current_terminal`].
+//!    [`termcompositor::LayerStack::render_to_current_terminal`].
 //! 4. Encode the framebuffer via
-//!    [`dashcompositor::ProtocolEncoder`] (auto-detected by
+//!    [`termcompositor::ProtocolEncoder`] (auto-detected by
 //!    default: `Protocol::Auto` picks Kitty or Sixel based on
 //!    `TERM` / `TERM_PROGRAM`; pass `--protocol <kitty|sixel|auto>`
 //!    to override; pass `--probe` to use the I/O-based Kitty
@@ -32,15 +32,15 @@
 
 use std::io::Write;
 
-use dashcompositor::{
+use termcompositor::{
     detect, LayerStack, Protocol, ProtocolEncoder, RectLayer, SolidColor, TerminalSize, TextLayer,
 };
-// `detect_with_probe` is only re-exported from `dashcompositor`
+// `detect_with_probe` is only re-exported from `termcompositor`
 // when the `kitty-encoder` Cargo feature is enabled (because the
 // probe depends on `little_kitty`). Gate the import accordingly
 // so the default build still compiles.
 #[cfg(feature = "kitty-encoder")]
-use dashcompositor::detect_with_probe;
+use termcompositor::detect_with_probe;
 
 /// Parse the `--protocol <kitty|sixel|auto>` CLI flag from the
 /// given argument list. Returns `None` if the flag is absent
@@ -109,7 +109,7 @@ impl Drop for DashPassthroughGuard {
 }/// Build the demo layer stack with background, centered rect,
 /// and text label. Returns the stack and the IDs of the
 /// background and rect layers (for post-render mutations).
-fn build_demo_stack(size: TerminalSize) -> (LayerStack, dashcompositor::LayerId, dashcompositor::LayerId) {
+fn build_demo_stack(size: TerminalSize) -> (LayerStack, termcompositor::LayerId, termcompositor::LayerId) {
     let mut stack = LayerStack::new();
 
     // 1. Add a full-frame blue background at z=0.
@@ -130,7 +130,7 @@ fn build_demo_stack(size: TerminalSize) -> (LayerStack, dashcompositor::LayerId,
 
     // 3. Add a text placeholder at z=20, anchored top-left.
     let label = stack.push(
-        TextLayer::new(2, 1, "dashcompositor", [255, 255, 255, 255])
+        TextLayer::new(2, 1, "termcompositor", [255, 255, 255, 255])
             .with_z(20)
             .with_name("title"),
     );
@@ -147,7 +147,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let size = TerminalSize::current();
     eprintln!(
-        "dashcompositor v0.11.0 -- multi-layer + auto-detect encoder: \
+        "termcompositor v0.11.0 -- multi-layer + auto-detect encoder: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,

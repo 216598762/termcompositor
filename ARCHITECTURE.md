@@ -1,6 +1,6 @@
 # Architecture
 
-`dashcompositor` is a **layer-based graphics compositor for the terminal**. It keeps an in-memory stack of layers, composites them into a single off-screen RGBA framebuffer, and projects the result to a terminal emulator via the Kitty graphics protocol or Sixel.
+`termcompositor` is a **layer-based graphics compositor for the terminal**. It keeps an in-memory stack of layers, composites them into a single off-screen RGBA framebuffer, and projects the result to a terminal emulator via the Kitty graphics protocol or Sixel.
 
 ---
 
@@ -169,7 +169,7 @@ behaviour of each path, from best (O(1) regardless of framebuffer size) to worst
 #### Kitty streaming path (`encode_to_writer`)
 
 **O(1) per chunk.** The Kitty graphics protocol limits each APC command to
-4096 bytes of base64-encoded data. `dashcompositor` encodes 768 RGBA pixels
+4096 bytes of base64-encoded data. `termcompositor` encodes 768 RGBA pixels
 (3072 raw bytes) per chunk — the exact amount that produces 4096 base64 chars
 with no padding, satisfying the spec's alignment requirement.
 
@@ -193,7 +193,7 @@ memory — it was allocated during compositing. The streaming encoder does not
 make its own copy or allocate any additional O(N) structure.
 
 ```rust
-use dashcompositor::encoder::kitty;
+use termcompositor::encoder::kitty;
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut out = Vec::new();               // grows with output size
@@ -214,7 +214,7 @@ directly to the `&mut impl Write` sink, rather than being **copied** into a
 new `Vec<u8>` via `into_bytes()`.
 
 ```rust
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut out = Vec::new();
@@ -246,7 +246,7 @@ Per band (6 rows):
   `write!()` and `write_all()`, with no intermediate buffer.
 
 ```rust
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut out = Vec::new();
@@ -260,7 +260,7 @@ dispatch that writes to a `&mut impl Write` sink. It is the recommended entry
 point for most users:
 
 ```rust
-use dashcompositor::{dispatch_to_writer, detect, FrameBuffer};
+use termcompositor::{dispatch_to_writer, detect, FrameBuffer};
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut out = Vec::new();
@@ -303,7 +303,7 @@ Memory behaviour depends on the resolved protocol:
 When the host is inside tmux, set `DASHPASSTHROUGH=1` to wrap Kitty APC output in a tmux passthrough DCS (`ESC P tmux ; ... ESC \`). Requires `set -g allow-passthrough on` in `~/.tmux.conf` (tmux 3.2+).
 
 ```rust
-use dashcompositor::wrap_for_tmux;
+use termcompositor::wrap_for_tmux;
 let tmux_safe = wrap_for_tmux(kitty_bytes);
 ```
 
@@ -396,7 +396,7 @@ on stderr and exit with code 0 (non-zero exit codes are reserved for
 shell-level issues like broken pipes):
 
 ```
-$ dashcompositor  # default build, no encoder features
+$ termcompositor  # default build, no encoder features
 ...
 encoder error for protocol sixel: protocol sixel is not supported in this build \
 (is the required Cargo feature enabled?)
@@ -405,7 +405,7 @@ encoder error for protocol sixel: protocol sixel is not supported in this build 
 Invalid CLI flags are also handled without panicking:
 
 ```
-$ dashcompositor --protocol unknown
+$ termcompositor --protocol unknown
 warning: unknown --protocol value `unknown`; falling back to `auto`
 ```
 
@@ -434,27 +434,27 @@ No public API function panics under normal use. Specifically:
 - **`CpuCompositor` is a reference implementation**: It's zero-dependency, single-threaded, and correct. Swap it out for a custom compositor via `LayerStack::render_with` without changing your layer setup.
 - **Streaming encode is the default path**: Even the `Vec<u8>`-returning `encode` functions delegate internally to the streaming entry points. Memory efficiency is built in.
 
-[`Layer`]: https://docs.rs/dashcompositor/latest/dashcompositor/trait.Layer.html
-[`LayerStack`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.LayerStack.html
-[`LayerEntry`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.LayerEntry.html
-[`LayerId`]: https://docs.rs/dashcompositor/latest/dashcompositor/type.LayerId.html
-[`Compositor`]: https://docs.rs/dashcompositor/latest/dashcompositor/trait.Compositor.html
-[`CpuCompositor`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.CpuCompositor.html
-[`SolidColor`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.SolidColor.html
-[`RectLayer`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.RectLayer.html
-[`TextLayer`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.TextLayer.html
-[`ImageLayer`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.ImageLayer.html
-[`FrameBuffer`]: https://docs.rs/dashcompositor/latest/dashcompositor/struct.FrameBuffer.html
-[`Protocol`]: https://docs.rs/dashcompositor/latest/dashcompositor/enum.Protocol.html
-[`ProtocolEncoder`]: https://docs.rs/dashcompositor/latest/dashcompositor/trait.ProtocolEncoder.html
-[`EncoderError`]: https://docs.rs/dashcompositor/latest/dashcompositor/enum.EncoderError.html
-[`dispatch_to_writer`]: https://docs.rs/dashcompositor/latest/dashcompositor/fn.dispatch_to_writer.html
-[`detect`]: https://docs.rs/dashcompositor/latest/dashcompositor/encoder/fn.detect.html
-[`detect_with_probe`]: https://docs.rs/dashcompositor/latest/dashcompositor/encoder/fn.detect_with_probe.html
-[`wrap_for_tmux`]: https://docs.rs/dashcompositor/latest/dashcompositor/fn.wrap_for_tmux.html
-[`layer`]: https://docs.rs/dashcompositor/latest/dashcompositor/layer/index.html
-[`compositor`]: https://docs.rs/dashcompositor/latest/dashcompositor/compositor/index.html
-[`framebuffer`]: https://docs.rs/dashcompositor/latest/dashcompositor/framebuffer/index.html
-[`encoder`]: https://docs.rs/dashcompositor/latest/dashcompositor/encoder/index.html
-[`terminal`]: https://docs.rs/dashcompositor/latest/dashcompositor/terminal/index.html
-[`geometry`]: https://docs.rs/dashcompositor/latest/dashcompositor/geometry/index.html
+[`Layer`]: https://docs.rs/termcompositor/latest/termcompositor/trait.Layer.html
+[`LayerStack`]: https://docs.rs/termcompositor/latest/termcompositor/struct.LayerStack.html
+[`LayerEntry`]: https://docs.rs/termcompositor/latest/termcompositor/struct.LayerEntry.html
+[`LayerId`]: https://docs.rs/termcompositor/latest/termcompositor/type.LayerId.html
+[`Compositor`]: https://docs.rs/termcompositor/latest/termcompositor/trait.Compositor.html
+[`CpuCompositor`]: https://docs.rs/termcompositor/latest/termcompositor/struct.CpuCompositor.html
+[`SolidColor`]: https://docs.rs/termcompositor/latest/termcompositor/struct.SolidColor.html
+[`RectLayer`]: https://docs.rs/termcompositor/latest/termcompositor/struct.RectLayer.html
+[`TextLayer`]: https://docs.rs/termcompositor/latest/termcompositor/struct.TextLayer.html
+[`ImageLayer`]: https://docs.rs/termcompositor/latest/termcompositor/struct.ImageLayer.html
+[`FrameBuffer`]: https://docs.rs/termcompositor/latest/termcompositor/struct.FrameBuffer.html
+[`Protocol`]: https://docs.rs/termcompositor/latest/termcompositor/enum.Protocol.html
+[`ProtocolEncoder`]: https://docs.rs/termcompositor/latest/termcompositor/trait.ProtocolEncoder.html
+[`EncoderError`]: https://docs.rs/termcompositor/latest/termcompositor/enum.EncoderError.html
+[`dispatch_to_writer`]: https://docs.rs/termcompositor/latest/termcompositor/fn.dispatch_to_writer.html
+[`detect`]: https://docs.rs/termcompositor/latest/termcompositor/encoder/fn.detect.html
+[`detect_with_probe`]: https://docs.rs/termcompositor/latest/termcompositor/encoder/fn.detect_with_probe.html
+[`wrap_for_tmux`]: https://docs.rs/termcompositor/latest/termcompositor/fn.wrap_for_tmux.html
+[`layer`]: https://docs.rs/termcompositor/latest/termcompositor/layer/index.html
+[`compositor`]: https://docs.rs/termcompositor/latest/termcompositor/compositor/index.html
+[`framebuffer`]: https://docs.rs/termcompositor/latest/termcompositor/framebuffer/index.html
+[`encoder`]: https://docs.rs/termcompositor/latest/termcompositor/encoder/index.html
+[`terminal`]: https://docs.rs/termcompositor/latest/termcompositor/terminal/index.html
+[`geometry`]: https://docs.rs/termcompositor/latest/termcompositor/geometry/index.html

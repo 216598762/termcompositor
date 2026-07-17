@@ -47,7 +47,7 @@ use std::io::Write;
 /// # Example
 ///
 /// ```
-/// use dashcompositor::Protocol;
+/// use termcompositor::Protocol;
 ///
 /// assert_eq!(Protocol::Kitty.as_str(), "kitty");
 /// assert_eq!(Protocol::Sixel.as_str(), "sixel");
@@ -84,7 +84,7 @@ impl Protocol {
 /// # Example
 ///
 /// ```
-/// use dashcompositor::EncoderError;
+/// use termcompositor::EncoderError;
 ///
 /// let err = EncoderError::UnsupportedProtocol("kitty");
 /// assert_eq!(
@@ -300,7 +300,7 @@ pub(crate) fn detect_with_env(
 /// # Example
 ///
 /// ```
-/// use dashcompositor::{FrameBuffer, Protocol, ProtocolEncoder};
+/// use termcompositor::{FrameBuffer, Protocol, ProtocolEncoder};
 ///
 /// let fb = FrameBuffer::new(2, 2);
 /// // Protocol::Auto dispatches through `detect()` at encode time.
@@ -410,7 +410,7 @@ impl ProtocolEncoder for Protocol {
 /// # Example
 ///
 /// ```
-/// use dashcompositor::{dispatch_to_writer, detect, FrameBuffer};
+/// use termcompositor::{dispatch_to_writer, detect, FrameBuffer};
 ///
 /// let fb = FrameBuffer::new(2, 2);
 /// let mut out = Vec::new();
@@ -990,7 +990,7 @@ mod kitty {
 
 // Re-export the v0.8.0/v0.8.3 wrap_for_tmux family at the
 // `encoder` module level so downstream users (and the
-// `dashcompositor` crate root) can call them without
+// `termcompositor` crate root) can call them without
 // reaching into the private `kitty` submodule. Gated on
 // `kitty-encoder` because the helpers are only useful for
 // Kitty output. The v0.8.3 additions (the streaming
@@ -1140,7 +1140,7 @@ mod sixel {
     // means lower image quality for photos (no adaptive
     // quantization per image) compared to `icy_sixel`'s
     // adaptive quantiser. For UI/dashboards (the
-    // dashcompositor primary use case) the quality loss is
+    // termcompositor primary use case) the quality loss is
     // minimal. The `icy_sixel`-based `encode_to_writer` is
     // preserved as the high-quality, O(N)-memory path for
     // small framebuffers; `encode_to_writer_streaming` is
@@ -1470,10 +1470,10 @@ mod sixel {
 
 // Re-export the v0.8.4 streaming Sixel `encode_to_writer`
 // at the `encoder` module level so downstream users can
-// call it as `dashcompositor::encoder::encode_to_writer`
+// call it as `termcompositor::encoder::encode_to_writer`
 // without reaching into the private `sixel` submodule.
 // This mirrors the kitty `encode_to_writer` access
-// pattern (`dashcompositor::encoder::kitty::encode_to_writer`):
+// pattern (`termcompositor::encoder::kitty::encode_to_writer`):
 // neither streaming entry point is re-exported at the
 // crate root, because a single crate-root `encode_to_writer`
 // name would be ambiguous in a build with both
@@ -1488,7 +1488,7 @@ pub use sixel::encode_to_writer;
 // Re-export the v0.8.5 fully-memory-bounded streaming
 // Sixel `encode_to_writer_streaming` at the `encoder`
 // module level so downstream users can call it as
-// `dashcompositor::encoder::encode_to_writer_streaming`
+// `termcompositor::encoder::encode_to_writer_streaming`
 // without reaching into the private `sixel` submodule.
 // This is the O(1)-memory counterpart to the v0.8.4
 // `encode_to_writer` (which still materialises the full

@@ -1,4 +1,4 @@
-# GitHub Actions CI for `dashcompositor`.
+# GitHub Actions CI for `termcompositor`.
 #
 # Runs the full validation chain on every push to `main` and on every
 # pull request that targets `main`:

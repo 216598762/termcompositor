@@ -1,6 +1,6 @@
-# Contributing to `dashcompositor`
+# Contributing to `termcompositor`
 
-Thank you for your interest in contributing! `dashcompositor` is a
+Thank you for your interest in contributing! `termcompositor` is a
 layer-based graphics compositor for the terminal, written in Rust.
 
 This file covers the conventions and workflows for human contributors.
@@ -28,7 +28,7 @@ cargo bench
 
 ## Feature matrix
 
-`dashcompositor` uses Cargo features to keep the default build
+`termcompositor` uses Cargo features to keep the default build
 dependency-light. Every PR must be tested against all relevant
 feature combinations:
 

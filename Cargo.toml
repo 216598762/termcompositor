@@ -1,11 +1,11 @@
 [package]
-name = "dashcompositor"
+name = "termcompositor"
 version = "0.11.0"
 edition = "2021"
 rust-version = "1.73"
 description = "Layer-based graphics compositor for the terminal (Kitty graphics protocol / Sixel)"
 license = "MIT"
-repository = "https://github.com/216598762/dashcompositor"
+repository = "https://github.com/216598762/termcompositor"
 readme = "README.md"
 keywords = ["terminal", "compositor", "graphics", "kitty", "sixel"]
 categories = ["graphics", "rendering"]
@@ -16,7 +16,7 @@ publish = true
 
 [features]
 # The `image-decoder` feature pulls in the `image` crate so the
-# `dashcompositor::ImageLayer` type is available.
+# `termcompositor::ImageLayer` type is available.
 # The `kitty-encoder` feature pulls in the `little-kitty` crate so
 # the `Protocol::Kitty` arm of `ProtocolEncoder::encode` produces
 # real Kitty graphics escape sequences; without it, the Kitty arm
@@ -85,11 +85,11 @@ name = "compositor"
 harness = false
 
 [lib]
-name = "dashcompositor"
+name = "termcompositor"
 path = "src/lib.rs"
 
 [[bin]]
-name = "dashcompositor"
+name = "termcompositor"
 path = "src/main.rs"
 
 # Other candidate crates (tiny-skia, wgpu, kittage, rasteroid) are

@@ -1,4 +1,4 @@
-//! CLI integration tests for the `dashcompositor` binary.
+//! CLI integration tests for the `termcompositor` binary.
 //!
 //! These tests exercise the command-line interface by spawning
 //! the binary with various flags and verifying its exit code,
@@ -9,10 +9,10 @@ use std::process::Command;
 /// Helper: run the binary with the given args and return
 /// (exit_code, stdout, stderr).
 fn run_binary(args: &[&str]) -> (i32, Vec<u8>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_dashcompositor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_termcompositor"))
         .args(args)
         .output()
-        .expect("failed to execute dashcompositor binary");
+        .expect("failed to execute termcompositor binary");
 
     let exit_code = output.status.code().unwrap_or(-1);
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -26,7 +26,7 @@ fn binary_runs_without_args() {
     let (exit_code, _stdout, stderr) = run_binary(&[]);
     assert_eq!(exit_code, 0, "binary should exit 0 with no args");
     assert!(
-        stderr.contains("dashcompositor"),
+        stderr.contains("termcompositor"),
         "stderr should mention the binary name"
     );
 }
@@ -39,7 +39,7 @@ fn binary_has_help_output() {
     // TODO: update when clap is added to check for usage information.
     assert_eq!(exit_code, 0, "binary should exit 0 with --help");
     assert!(
-        stderr.contains("dashcompositor"),
+        stderr.contains("termcompositor"),
         "stderr should mention the binary name"
     );
 }
@@ -48,7 +48,7 @@ fn binary_has_help_output() {
 fn binary_outputs_version_info_in_stderr() {
     let (_, _, stderr) = run_binary(&[]);
     assert!(
-        stderr.contains("v0.11.0") || stderr.contains("dashcompositor"),
+        stderr.contains("v0.11.0") || stderr.contains("termcompositor"),
         "stderr should contain version info: {stderr}"
     );
 }

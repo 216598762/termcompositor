@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide covers how to use `dashcompositor` as a library and as a CLI tool.
+This guide covers how to use `termcompositor` as a library and as a CLI tool.
 
 ---
 
@@ -24,29 +24,29 @@ This guide covers how to use `dashcompositor` as a library and as a CLI tool.
 
 ```toml
 [dependencies]
-dashcompositor = "0.12"
+termcompositor = "0.12"
 ```
 
 Enable encoder features to produce terminal output:
 
 ```toml
 [dependencies]
-dashcompositor = { version = "0.12", features = ["kitty-encoder", "sixel-encoder"] }
+termcompositor = { version = "0.12", features = ["kitty-encoder", "sixel-encoder"] }
 ```
 
 ### As a CLI tool
 
 ```bash
-cargo install dashcompositor
+cargo install termcompositor
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/216598762/dashcompositor
-cd dashcompositor
+git clone https://github.com/216598762/termcompositor
+cd termcompositor
 cargo build --release --features kitty-encoder,sixel-encoder
-./target/release/dashcompositor
+./target/release/termcompositor
 ```
 
 ---
@@ -56,7 +56,7 @@ cargo build --release --features kitty-encoder,sixel-encoder
 ### Quick start
 
 ```rust
-use dashcompositor::{
+use termcompositor::{
     dispatch_to_writer, detect, FrameBuffer, LayerStack, SolidColor, TextLayer,
 };
 
@@ -80,7 +80,7 @@ std::io::stdout().write_all(&out).unwrap();
 ### Working with layers
 
 ```rust
-use dashcompositor::{LayerStack, RectLayer, SolidColor, TextLayer};
+use termcompositor::{LayerStack, RectLayer, SolidColor, TextLayer};
 
 let mut stack = LayerStack::new();
 
@@ -91,7 +91,7 @@ let rect = stack.push(
         .with_name("centered-rect"),
 );
 let label = stack.push(
-    TextLayer::new(2, 1, "dashcompositor", [255, 255, 255, 255])
+    TextLayer::new(2, 1, "termcompositor", [255, 255, 255, 255])
         .with_z(20)
         .with_name("title"),
 );
@@ -110,7 +110,7 @@ stack.get_mut(label).unwrap().set_visible(false);
 Auto-detect the terminal size and render to fit:
 
 ```rust
-use dashcompositor::{LayerStack, SolidColor, TextLayer};
+use termcompositor::{LayerStack, SolidColor, TextLayer};
 
 let mut stack = LayerStack::new();
 stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
@@ -124,7 +124,7 @@ assert_eq!(size.rows as u32, fb.height());
 ### End-to-end: encode and write
 
 ```rust
-use dashcompositor::{
+use termcompositor::{
     dispatch_to_writer, detect, FrameBuffer, LayerStack, SolidColor,
 };
 use std::io::{BufWriter, Write};
@@ -143,10 +143,10 @@ writer.flush().unwrap();
 
 ### Custom compositor
 
-Implement the [`Compositor`](https://docs.rs/dashcompositor/latest/dashcompositor/trait.Compositor.html) trait for custom rendering logic:
+Implement the [`Compositor`](https://docs.rs/termcompositor/latest/termcompositor/trait.Compositor.html) trait for custom rendering logic:
 
 ```rust
-use dashcompositor::{Compositor, CpuCompositor, FrameBuffer, LayerStack};
+use termcompositor::{Compositor, CpuCompositor, FrameBuffer, LayerStack};
 
 struct DoubleCompositor;
 
@@ -175,11 +175,11 @@ Requires the `image-decoder` feature:
 
 ```toml
 [dependencies]
-dashcompositor = { version = "0.12", features = ["image-decoder"] }
+termcompositor = { version = "0.12", features = ["image-decoder"] }
 ```
 
 ```rust
-use dashcompositor::{ImageLayer, LayerStack};
+use termcompositor::{ImageLayer, LayerStack};
 
 let mut stack = LayerStack::new();
 let img = ImageLayer::from_path("logo.png", 4, 2).unwrap();
@@ -191,8 +191,8 @@ let id = stack.push(img.with_z(10));
 For multi-megapixel framebuffers, use the streaming entry points to avoid materialising the full output in memory:
 
 ```rust,ignore
-use dashcompositor::encoder::kitty;
-use dashcompositor::framebuffer::FrameBuffer;
+use termcompositor::encoder::kitty;
+use termcompositor::framebuffer::FrameBuffer;
 use std::io::BufWriter;
 
 let fb = FrameBuffer::new(1920, 1080);
@@ -204,7 +204,7 @@ kitty::encode_to_writer(&fb, &mut writer).unwrap();
 For Sixel (requires the `sixel-encoder` feature):
 
 ```rust,ignore
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut writer = BufWriter::new(std::io::stdout().lock());
@@ -214,7 +214,7 @@ sixel::encode_to_writer(&fb, &mut writer).unwrap();
 For the O(1)-memory Sixel path (fixed xterm-256 palette, no `icy_sixel`):
 
 ```rust,ignore
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut writer = BufWriter::new(std::io::stdout().lock());
@@ -227,18 +227,18 @@ sixel::encode_to_writer_streaming(&fb, &mut writer).unwrap();
 
 ```bash
 # Default: auto-detect terminal size and protocol
-dashcompositor
+termcompositor
 
 # Override protocol
-dashcompositor --protocol kitty
-dashcompositor --protocol sixel
-dashcompositor --protocol auto
+termcompositor --protocol kitty
+termcompositor --protocol sixel
+termcompositor --protocol auto
 
 # Use I/O-based Kitty probe (requires kitty-encoder feature)
-dashcompositor --probe
+termcompositor --probe
 
 # Enable tmux passthrough
-dashcompositor --tmux-passthrough
+termcompositor --tmux-passthrough
 ```
 
 The CLI:
@@ -251,11 +251,11 @@ The CLI:
 Human-readable diagnostics are written to stderr:
 
 ```
-$ dashcompositor
-dashcompositor v0.12.0 -- multi-layer + auto-detect encoder: host terminal = 80 cols x 24 rows
+$ termcompositor
+termcompositor v0.12.0 -- multi-layer + auto-detect encoder: host terminal = 80 cols x 24 rows
 background: SolidColor([0, 0, 64, 255])
 rect:      RectLayer at (20,6) 40x12 [0,200,0,200] z=10
-label:     TextLayer at (2,1) "dashcompositor" z=20
+label:     TextLayer at (2,1) "termcompositor" z=20
 requested protocol: auto; resolved: sixel
 encoded 142 bytes via sixel; writing to stdout
 ```
@@ -277,7 +277,7 @@ Enable at least one encoder feature to produce terminal output. With neither, `d
 
 ## Protocol auto-detection
 
-`dashcompositor::detect()` reads `TERM`, `TERM_PROGRAM`, and `COLORTERM` from the process environment and returns a `Protocol` suggestion.
+`termcompositor::detect()` reads `TERM`, `TERM_PROGRAM`, and `COLORTERM` from the process environment and returns a `Protocol` suggestion.
 
 Priority order:
 
@@ -291,7 +291,7 @@ Priority order:
 For authoritative detection (I/O-based Kitty query-response probe), use `detect_with_probe()` (requires `kitty-encoder` feature):
 
 ```rust
-use dashcompositor::detect_with_probe;
+use termcompositor::detect_with_probe;
 let protocol = detect_with_probe().unwrap_or_else(|_| detect());
 ```
 
@@ -319,7 +319,7 @@ The Sixel encoder provides two paths:
 
 ## Choosing the right encode path
 
-`dashcompositor` has three encode paths with different memory and quality
+`termcompositor` has three encode paths with different memory and quality
 profiles. Here's how to pick the right one for your use case.
 
 ### Quick decision guide
@@ -350,7 +350,7 @@ cause memory spikes on large framebuffers.
 #### Path 1: `dispatch_to_writer` (the easy button)
 
 ```rust
-use dashcompositor::{dispatch_to_writer, detect, FrameBuffer};
+use termcompositor::{dispatch_to_writer, detect, FrameBuffer};
 
 let fb = FrameBuffer::new(1920, 1080);
 let mut stdout = std::io::stdout();
@@ -365,7 +365,7 @@ path (O(N) input). One function call, best-effort behaviour.
 #### Path 2: Kitty direct (O(1) memory, requires `kitty-encoder`)
 
 ```rust
-use dashcompositor::encoder::kitty;
+use termcompositor::encoder::kitty;
 
 kitty::encode_to_writer(&fb, &mut stdout)?;
 ```
@@ -380,7 +380,7 @@ memory at ~7KB regardless of framebuffer size. Ideal for:
 #### Path 3: Sixel via `icy_sixel` (O(N) input, requires `sixel-encoder`)
 
 ```rust
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 sixel::encode_to_writer(&fb, &mut stdout)?;
 ```
@@ -395,7 +395,7 @@ Best for:
 #### Path 4: Sixel streaming (O(1) memory, requires `sixel-encoder`)
 
 ```rust
-use dashcompositor::encoder::sixel;
+use termcompositor::encoder::sixel;
 
 sixel::encode_to_writer_streaming(&fb, &mut stdout)?;
 ```
@@ -431,19 +431,19 @@ Enable with:
 
 ```bash
 export DASHPASSTHROUGH=1
-dashcompositor
+termcompositor
 ```
 
 Or per-invocation:
 
 ```bash
-DASHPASSTHROUGH=1 dashcompositor
+DASHPASSTHROUGH=1 termcompositor
 ```
 
 Or via the CLI flag:
 
 ```bash
-dashcompositor --tmux-passthrough
+termcompositor --tmux-passthrough
 ```
 
 **Requirements:**
@@ -455,7 +455,7 @@ Both the `DASHPASSTHROUGH` env var and the `TMUX` env var must be set for the wr
 Programmatic usage:
 
 ```rust
-use dashcompositor::wrap_for_tmux;
+use termcompositor::wrap_for_tmux;
 
 let raw_kitty = Protocol::Kitty.encode(&fb)?;
 let tmux_safe = wrap_for_tmux(raw_kitty);
@@ -465,7 +465,7 @@ std::io::stdout().write_all(&tmux_safe)?;
 Or use the end-to-end streaming entry point for O(1) memory:
 
 ```rust,ignore
-use dashcompositor::encoder::kitty;
+use termcompositor::encoder::kitty;
 
 kitty::encode_passthrough_to_writer(&fb, &mut stdout)?;
 ```
@@ -486,7 +486,7 @@ enabling the corresponding Cargo feature in your `Cargo.toml`.
 
 ```toml
 [dependencies]
-dashcompositor = { version = "0.12", features = ["kitty-encoder", "sixel-encoder"] }
+termcompositor = { version = "0.12", features = ["kitty-encoder", "sixel-encoder"] }
 ```
 
 Enable at least one encoder feature. If you want auto-detection to work for all
@@ -563,10 +563,10 @@ value) for layout verification.
 
 ```toml
 [dependencies]
-dashcompositor = { version = "0.12", default-features = false, features = ["font-rasterizer"] }
+termcompositor = { version = "0.12", default-features = false, features = ["font-rasterizer"] }
 ```
 
-`font-rasterizer` is enabled by default, so plain `dashcompositor = "0.12"`
+`font-rasterizer` is enabled by default, so plain `termcompositor = "0.12"`
 already includes it. If you're using `default-features = false`, add it back
 manually.
 
@@ -580,7 +580,7 @@ manually.
 
 ```toml
 [dependencies]
-dashcompositor = { version = "0.12", features = ["image-decoder"] }
+termcompositor = { version = "0.12", features = ["image-decoder"] }
 ```
 
 ### Auto-detection picks the wrong protocol
@@ -638,7 +638,7 @@ the full decision guide.
 
 **Cause**: The underlying encoder crate (`little-kitty` or `icy_sixel`)
 returned an error. This is rare and usually indicates an internal issue
-in those libraries rather than a misuse of `dashcompositor`.
+in those libraries rather than a misuse of `termcompositor`.
 
 **What to do**:
 1. Check the inner error message for clues.
@@ -653,8 +653,8 @@ encoder feature is enabled), it prints a descriptive error to stderr and
 exits with code 0:
 
 ```
-$ ./target/release/dashcompositor  # default build, no encoder features
-dashcompositor v0.12.0 -- multi-layer + auto-detect encoder: host terminal = 80 cols x 24 rows
+$ ./target/release/termcompositor  # default build, no encoder features
+termcompositor v0.12.0 -- multi-layer + auto-detect encoder: host terminal = 80 cols x 24 rows
 ...
 encoder error for protocol sixel: protocol sixel is not supported in this build (is the required Cargo feature enabled?)
 ```

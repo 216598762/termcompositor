@@ -75,7 +75,7 @@ probe into a real text renderer.
 ### Added
 - `fontdue = "0.9"` as an optional dependency (MIT/Apache-2.0/Zlib
   licensed), gated behind the new `font-rasterizer` Cargo feature.
-- `dashcompositor::FontSource` enum (gated on `font-rasterizer`):
+- `termcompositor::FontSource` enum (gated on `font-rasterizer`):
   `Bundled` (default), `Path(PathBuf)`, or `Bytes(&'static [u8])`.
   The bundled font is Fira Mono Regular, embedded at compile time
   via `include_bytes!`.
@@ -156,8 +156,8 @@ single end-to-end streaming dispatch.
 ### Added
 - `pub fn dispatch_to_writer<W: Write>(protocol: Protocol,
   frame: &FrameBuffer, out: &mut W) -> Result<()>` in
-  `dashcompositor::encoder`. Re-exported at the crate
-  root as `dashcompositor::dispatch_to_writer`.
+  `termcompositor::encoder`. Re-exported at the crate
+  root as `termcompositor::dispatch_to_writer`.
 - For `Protocol::Kitty`: delegates to
   `kitty::encode_passthrough_to_writer` (which handles
   the optional tmux passthrough wrap when the
@@ -200,7 +200,7 @@ framebuffer in a `Vec<u8>` (8MB+ for a 2MP image)
 because `icy_sixel::SixelImage::from_rgba(Vec<u8>, w, h)`
 takes owned bytes and has no streaming input API.
 v0.8.5 adds a new public streaming entry point
-`dashcompositor::encoder::sixel::encode_to_writer_streaming<W: Write>(
+`termcompositor::encoder::sixel::encode_to_writer_streaming<W: Write>(
 frame: &FrameBuffer, out: &mut W) -> Result<(), EncoderError>`
 that uses a fixed xterm-256 palette (16 basic + 6x6x6
 RGB cube + 24 grayscale) and emits band-by-band in a
@@ -213,12 +213,12 @@ Kitty arm's v0.8.2 streaming entry point.
 ### Added
 - `pub fn sixel::encode_to_writer_streaming<W: Write>(
   frame, &mut W) -> Result<(), EncoderError>` in
-  `dashcompositor::encoder`, gated on the
+  `termcompositor::encoder`, gated on the
   `sixel-encoder` Cargo feature. Writes the Sixel DCS
   bytes to any `std::io::Write` impl (e.g. `Vec<u8>`,
   `std::fs::File`, `std::net::TcpStream`).
   Re-exported at the encoder module level as
-  `dashcompositor::encoder::encode_to_writer_streaming`
+  `termcompositor::encoder::encode_to_writer_streaming`
   (NOT at the crate root, to avoid the ambiguity of
   a single `encode_to_writer_streaming` name resolving
   to different encoders depending on the feature set).
@@ -252,7 +252,7 @@ Kitty arm's v0.8.2 streaming entry point.
 The fixed xterm-256 palette means lower image quality
 for photos (no adaptive quantization per image)
 compared to `icy_sixel`'s adaptive quantiser. For
-UI/dashboards (the dashcompositor primary use case)
+UI/dashboards (the termcompositor primary use case)
 the quality loss is minimal. The `icy_sixel`-based
 `encode_to_writer` is preserved as the high-quality,
 O(N)-memory path for small framebuffers;
@@ -301,17 +301,17 @@ the intermediate Sixel-output `Vec<u8>` allocation.
 ### Added
 - `pub fn sixel::encode_to_writer<W: Write>(frame, &mut W)
   -> Result<(), EncoderError>` in
-  `dashcompositor::encoder`, gated on the
+  `termcompositor::encoder`, gated on the
   `sixel-encoder` Cargo feature. Writes the Sixel DCS
   bytes to any `std::io::Write` impl (e.g. `Vec<u8>`,
   `std::fs::File`, `std::net::TcpStream`).
   Re-exported at the encoder module level as
-  `dashcompositor::encoder::encode_to_writer`
+  `termcompositor::encoder::encode_to_writer`
   (NOT at the crate root, to avoid the ambiguity of a
   single `encode_to_writer` name resolving to different
   encoders depending on the feature set; this mirrors
   the kitty `encode_to_writer` access pattern at
-  `dashcompositor::encoder::kitty::encode_to_writer`).
+  `termcompositor::encoder::kitty::encode_to_writer`).
 
 ### Changed
 - `sixel::encode(frame) -> Result<Vec<u8>, EncoderError>`
@@ -382,13 +382,13 @@ O(1) per write call:
 ### Added
 - `pub fn kitty::wrap_for_tmux_to_writer<W: Write>(
   inner: &[u8], out: &mut W) -> io::Result<()>` in
-  `dashcompositor::encoder`. The streaming version of
+  `termcompositor::encoder`. The streaming version of
   `wrap_for_tmux`: takes the raw Kitty APC bytes as a
   slice and writes the wrapped DCS bytes directly to a
   `&mut impl Write` sink. Memory bounded: O(1) (no
   intermediate `Vec` allocation).
 - `pub struct kitty::PassthroughWriter<W: Write>` in
-  `dashcompositor::encoder`. A `Write` adapter that
+  `termcompositor::encoder`. A `Write` adapter that
   wraps the inner output in a tmux passthrough DCS:
   writes the DCS prefix on the first byte, doubles
   every `ESC` byte in subsequent body writes, and
@@ -396,7 +396,7 @@ O(1) per write call:
   v0.8.3 building block for end-to-end O(1) streaming.
 - `pub fn kitty::encode_passthrough_to_writer<W: Write>(
   frame: &FrameBuffer, out: &mut W) -> Result<()>` in
-  `dashcompositor::encoder`. The end-to-end O(1) entry
+  `termcompositor::encoder`. The end-to-end O(1) entry
   point: encodes the frame and (if the tmux passthrough
   opt-in is set) wraps the output in a tmux passthrough
   DCS, all in a single pass with O(1) memory. When the
@@ -429,7 +429,7 @@ Memory-bounded streaming Kitty encode: the v0.8.1 chunked
 encoder previously materialised the entire framebuffer in
 a `Vec<u8>` (8MB+ for a 2MP image) before chunking.
 v0.8.2 adds a new public streaming entry point
-`dashcompositor::encoder::kitty::encode_to_writer<W: Write>(
+`termcompositor::encoder::kitty::encode_to_writer<W: Write>(
 frame: &FrameBuffer, out: &mut W) -> Result<(), EncoderError>`
 that writes the encoded APC bytes directly to a
 caller-supplied `&mut impl Write` sink. Peak working set
@@ -441,7 +441,7 @@ through the streaming path internally (it just passes
 
 ### Added
 - `pub fn kitty::encode_to_writer<W: Write>(frame, &mut W)
-  -> Result<(), EncoderError>` in `dashcompositor::encoder`,
+  -> Result<(), EncoderError>` in `termcompositor::encoder`,
   gated on the `kitty-encoder` Cargo feature. Writes the
   encoded APC bytes to any `std::io::Write` impl (e.g.
   `Vec<u8>`, `std::fs::File`, `std::net::TcpStream`).
@@ -623,8 +623,8 @@ output.
 
 ### Added
 - `pub fn wrap_for_tmux(inner: Vec<u8>) -> Vec<u8>` in
-  `dashcompositor::encoder` (gated on the `kitty-encoder`
-  Cargo feature; re-exported as `dashcompositor::wrap_for_tmux`).
+  `termcompositor::encoder` (gated on the `kitty-encoder`
+  Cargo feature; re-exported as `termcompositor::wrap_for_tmux`).
   Pure byte transform: prepends `ESC P tmux ;` to the input,
   doubles every inner `ESC` byte (so tmux 3.2+ passes them
   through as a single literal `ESC` to the outer terminal),
@@ -718,14 +718,14 @@ output.
     responsibility)".
 
 ### Changed
-- `lib.rs` re-exports `dashcompositor::wrap_for_tmux`
+- `lib.rs` re-exports `termcompositor::wrap_for_tmux`
   (gated on `kitty-encoder`).
 - `with_env` test helper signature changed from
   `(term, term_program, colorterm, f)` to
   `(term, term_program, colorterm, dash_passthrough, f)`.
   All 5 existing call sites updated to pass `None` for
   the new arg. This is a test-only change; the public
-  API of `dashcompositor` is unchanged except for the
+  API of `termcompositor` is unchanged except for the
   new `wrap_for_tmux` re-export.
 - `main.rs` version banner updated from `v0.7.1` to
   `v0.8.0`. New tmux-passthrough log line added after
@@ -845,7 +845,7 @@ plus a Kitty query-response probe via
 - `Protocol::Auto` variant on the existing `Protocol` enum. The
   `as_str` impl returns `"auto"` for the new variant. Both
   `EncoderError` and `ProtocolEncoder` are unchanged.
-- `pub fn detect() -> Protocol` in `dashcompositor::encoder`:
+- `pub fn detect() -> Protocol` in `termcompositor::encoder`:
   pure env-var detection (`TERM` / `TERM_PROGRAM` / `COLORTERM`).
   Always available, no I/O, never panics. The shim that
   `Protocol::Auto::encode` dispatches through. Heuristics, in
@@ -1059,7 +1059,7 @@ the optional `little-kitty` (v0.0.3) crate behind a new
 `kitty-encoder` Cargo feature. Sixel remains the v0.6.0 work.
 
 ### Added
-- `ProtocolEncoder` trait in `dashcompositor::encoder`:
+- `ProtocolEncoder` trait in `termcompositor::encoder`:
   - Signature: `fn encode(&self, frame: &FrameBuffer) -> Result<Vec<u8>, EncoderError>`.
   - Implementor: `Protocol`, dispatching on the protocol variant.
   - Returns a `Vec<u8>` of terminal escape sequences; the caller
@@ -1140,7 +1140,7 @@ offset + `bounds()`).
 ### Added
 - `src/geometry.rs` -- new `Rect { x, y, width, height }`
   geometry primitive with `is_empty`, `contains`, and
-  `intersects` helpers. Re-exported as `dashcompositor::Rect`.
+  `intersects` helpers. Re-exported as `termcompositor::Rect`.
 - `RectLayer` (always available): RGBA solid at `(x, y)`
   with `width x height`. `bounds()` reports the rect; render
   writes are clipped to the framebuffer.
@@ -1189,7 +1189,7 @@ offset + `bounds()`).
 
 # Changelog
 
-All notable changes to `dashcompositor` are recorded here. The format
+All notable changes to `termcompositor` are recorded here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
@@ -1268,7 +1268,7 @@ or library user) can drive at will, addressing the original
 
 ## 0.1.0 (2026-07-02)
 
-Initial scaffold of `dashcompositor`, a layer-based graphics compositor
+Initial scaffold of `termcompositor`, a layer-based graphics compositor
 for the terminal that projects a fully composited RGBA framebuffer to the
 host via the Kitty graphics protocol or Sixel.
 

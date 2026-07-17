@@ -8,7 +8,7 @@
 /// # Example
 ///
 /// ```
-/// use dashcompositor::FrameBuffer;
+/// use termcompositor::FrameBuffer;
 ///
 /// // Create a 4x4 transparent framebuffer.
 /// let mut fb = FrameBuffer::new(4, 4);
@@ -132,7 +132,7 @@ impl FrameBuffer {
 /// # Example
 ///
 /// ```
-/// use dashcompositor::blend_over;
+/// use termcompositor::blend_over;
 ///
 /// // Blend a translucent red over a blue background.
 /// let mut dst = [0, 0, 255, 255];  // opaque blue
