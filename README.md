@@ -9,6 +9,13 @@ result to your terminal via the Kitty graphics protocol or Sixel.
 It is a **rendering pipeline**, not a terminal emulator: no TTY management,
 no shell input. You build a frame, `termcompositor` encodes it.
 
+## Highlights
+
+- **Animation loop** — built-in frame loop with delta-time tracking, terminal resize handling, and opt-in rendering via `animation::run()`. CLI flags: `--animate` and `--fps <N>`.
+- **Layer transforms** — per-layer rotation and scaling via `Transform` with anchor points and bilinear interpolation.
+- **Rich layer types** — `SolidColor`, `RectLayer`, `TextLayer`, `GradientLayer`, `BorderLayer`, `CanvasLayer`, `DropShadow`, `SceneGraph`.
+- **Dual protocol support** — Kitty graphics protocol and Sixel, with auto-detection.
+
 ## Architecture (one line)
 
 ```

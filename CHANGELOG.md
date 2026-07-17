@@ -1,20 +1,81 @@
 ## [Unreleased]
 
+## 0.14.0 (2026-07-17)
+
+Animation loop and layer transforms. This release adds a built-in
+frame loop with delta-time tracking and terminal resize handling,
+as well as per-layer rotation and scaling via a new `Transform`
+struct. Both features are designed for real-time animated dashboards
+and visual effects.
+
 ### Added
 
-- **GradientLayer**: linear and radial gradient support with sRGB interpolation
+- **Animation Loop** (`src/animation.rs`): built-in frame loop with
+  delta-time tracking, frame scheduling, and terminal resize
+  handling.
+  - `AnimContext`: per-frame context providing access to the layer
+    stack, delta time, elapsed time, frame count, and terminal
+    dimensions.
+  - `AnimConfig`: configuration struct with target FPS, protocol
+    selection, and clear-between-frames toggle.
+  - `run(fps, callback)`: entry point with empty layer stack.
+  - `run_with_stack(stack, fps, callback)`: entry point with
+    initial layers.
+  - `run_with_config(stack, config, callback)`: full-control entry
+    point.
+  - `request_redraw()`: opt-in rendering — frames without a redraw
+    request skip encoding, saving CPU.
+  - `exit()`: graceful shutdown after the current frame.
+  - Terminal size is re-detected each frame; the framebuffer is
+    resized automatically.
+  - Protocol is resolved once at startup (Auto detection cached).
+  - 11 unit tests covering context fields, config builders, frame
+    timing, exit semantics, and panic on invalid FPS.
+  - CLI flags: `--animate` and `--fps <N>` on the `main.rs` demo.
+
+- **Layer Transforms** (`src/geometry.rs`, `src/layer.rs`,
+  `src/compositor.rs`): per-layer rotation and scaling via affine
+  2D transforms.
+  - `Transform` struct with rotation (degrees, clockwise), scale
+    (x, y), and anchor point (layer-local coordinates).
+  - Builder pattern: `Transform::new().with_rotation(45.0)
+    .with_scale(1.5, 1.5).with_anchor(50.0, 50.0)`.
+  - `apply(x, y)` — forward mapping (layer-local → target).
+  - `apply_inverse(x, y)` — inverse mapping (target → layer-local)
+    for bilinear interpolation during rendering.
+  - `LayerEntry` gains `transform`, `transform_mut()`,
+    `set_transform()`, and `with_transform()` builder.
+  - `CpuCompositor::compose` applies transforms via inverse mapping
+    with bilinear interpolation when a non-identity transform is
+    present.
+  - Bounding-box optimization: the compositor transforms the four
+    corners of the source region and only iterates over the
+    resulting axis-aligned bounding box on the target.
+  - `Transform` re-exported at crate root alongside existing `Rect`.
+  - 8 unit tests + 6 proptest property tests for `Transform`
+    (identity, builder, apply, inverse roundtrip, anchor).
+  - 5 compositor-level tests for transform rendering (rotation,
+    scale, identity equivalence, opacity correctness, position
+    change).
+
+- **GradientLayer**: linear and radial gradient support with sRGB
+  interpolation
   - `GradientKind::Linear` with start/end coordinates
   - `GradientKind::Radial` with center and radius
   - Builder pattern with `with_z()` and `with_name()`
-- **BorderLayer**: rectangular border (stroke only) with configurable border width
+- **BorderLayer**: rectangular border (stroke only) with configurable
+  border width
   - Draws the outline of a rectangle without filling the interior
-  - `border_width` controls thickness, clamped to half the smallest dimension
+  - `border_width` controls thickness, clamped to half the smallest
+    dimension
   - Supports opacity and offset translation
 - **CanvasLayer**: freeform drawing canvas with pixel-level control
-  - `draw_pixel()`, `draw_line()` (Bresenham), `draw_circle()` (midpoint)
+  - `draw_pixel()`, `draw_line()` (Bresenham), `draw_circle()`
+    (midpoint)
   - `fill_rect()` and `clear()` helpers
   - Skips transparent pixels during render for efficiency
-- **DropShadow**: wrapper layer that adds a blurred shadow behind any inner layer
+- **DropShadow**: wrapper layer that adds a blurred shadow behind any
+  inner layer
   - Configurable offset, blur radius, and shadow colour
   - Uses two-pass box blur (horizontal + vertical)
   - Renders shadow first, then original layer on top
@@ -22,20 +83,27 @@
   - Cascading visibility (parent hidden = all children hidden)
   - Cascading opacity (parent opacity × child opacity)
   - Cascading offset (parent offset + child offset)
-  - `add_group()`, `add_group_to()`, `add_child()`, `add_child_to()`
-  - `set_visible()`, `set_opacity()`, `set_offset()` runtime control
-- **6 proptest property-based tests** for CanvasLayer drawing primitives
-- **35 integration tests** in tests/pipeline.rs covering all layer types
-  with both Kitty and Sixel protocols
+  - `add_group()`, `add_group_to()`, `add_child()`,
+    `add_child_to()`
+  - `set_visible()`, `set_opacity()`, `set_offset()` runtime
+    control
+- **6 proptest property-based tests** for CanvasLayer drawing
+  primitives
+- **35 integration tests** in tests/pipeline.rs covering all layer
+  types with both Kitty and Sixel protocols
 - **13 unit tests** for SceneGraph cascading transforms
 - **10 unit tests** for DropShadow rendering and box blur
 - **46 unit tests** for GradientLayer, BorderLayer, CanvasLayer
 
 ### Fixed
 
-- Consolidated 6 flaky `TmuxPassthroughGuard` env var tests into a single
-  sequential test (`guard_all_env_var_scenarios`) to eliminate parallel
-  execution race conditions
+- Consolidated 6 flaky `TmuxPassthroughGuard` env var tests into a
+  single sequential test (`guard_all_env_var_scenarios`) to eliminate
+  parallel execution race conditions
+- Fixed `#[cfg(feature = "kitty-encoder")]` gate on two encoder
+  tests that referenced `super::kitty::encode_to_writer` without
+  the feature flag, which caused compilation failures when running
+  the full test suite
 
 ## 0.12.0 (2026-07-17)
 
