@@ -433,63 +433,38 @@ mod tests {
     // ── TmuxPassthroughGuard ──────────────────────────────────
 
     /// Helper: ensure the TMUXPASSTHROUGH env var is absent before
-    /// and after the test. TmuxPassthroughGuard::drop handles the
-    /// "after" part for the guard's own saved state.
-    fn ensure_tmuxpassthrough_absent() {
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
-    }
 
+    /// Consolidated test for TmuxPassthroughGuard env var management.
+    /// All env var tests are in a single function to avoid parallel
+    /// execution race conditions (env vars are process-global state).
     #[test]
-    fn guard_set_some_sets_env_var() {
-        ensure_tmuxpassthrough_absent();
+    fn guard_all_env_var_scenarios() {
+        let _ = std::env::remove_var("TMUXPASSTHROUGH");
+
+        // --- Test 1: set(Some) when absent sets var, drop removes it ---
         {
-            let _guard = TmuxPassthroughGuard::set(Some("1"));
+            let _guard1 = TmuxPassthroughGuard::set(Some("1"));
             assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "1");
         }
-        // Guard dropped — env var should be removed (was absent before).
-        assert!(std::env::var("TMUXPASSTHROUGH").is_err());
-    }
+        assert!(std::env::var("TMUXPASSTHROUGH").is_err(), "should be removed after drop when absent before");
 
-    #[test]
-    fn guard_set_none_removes_env_var() {
-        ensure_tmuxpassthrough_absent();
-        // Pre-set the var so we can verify set(None) removes it.
+        // --- Test 2: set(None) when present removes var, drop restores ---
         std::env::set_var("TMUXPASSTHROUGH", "existing");
         {
             let _guard = TmuxPassthroughGuard::set(None);
             assert!(std::env::var("TMUXPASSTHROUGH").is_err());
         }
-        // Guard dropped — should restore the original value.
         assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "existing");
-    }
 
-    #[test]
-    fn guard_set_some_restores_previous_value() {
-        ensure_tmuxpassthrough_absent();
+        // --- Test 3: set(Some) when present overrides, drop restores ---
         std::env::set_var("TMUXPASSTHROUGH", "old");
         {
-            let _guard = TmuxPassthroughGuard::set(Some("new"));
+            let _guard2 = TmuxPassthroughGuard::set(Some("new"));
             assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "new");
         }
-        // Guard dropped — should restore "old".
         assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "old");
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
-    }
 
-    #[test]
-    fn guard_drop_removes_var_when_absent_before() {
-        ensure_tmuxpassthrough_absent();
-        {
-            let _guard = TmuxPassthroughGuard::set(Some("1"));
-            assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "1");
-        }
-        // Guard dropped — should remove the var entirely.
-        assert!(std::env::var("TMUXPASSTHROUGH").is_err());
-    }
-
-    #[test]
-    fn guard_nested_guards_restore_correctly() {
-        ensure_tmuxpassthrough_absent();
+        // --- Test 4: nested guards restore in LIFO order ---
         std::env::set_var("TMUXPASSTHROUGH", "original");
         {
             let _outer = TmuxPassthroughGuard::set(Some("outer"));
@@ -498,22 +473,19 @@ mod tests {
                 let _inner = TmuxPassthroughGuard::set(Some("inner"));
                 assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "inner");
             }
-            // Inner guard dropped — should restore "outer".
             assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "outer");
         }
-        // Outer guard dropped — should restore "original".
         assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "original");
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
-    }
 
-    #[test]
-    fn guard_set_none_when_absent_leaves_absent() {
-        ensure_tmuxpassthrough_absent();
+        // --- Test 5: set(None) when absent leaves absent ---
+        let _ = std::env::remove_var("TMUXPASSTHROUGH");
         {
             let _guard = TmuxPassthroughGuard::set(None);
             assert!(std::env::var("TMUXPASSTHROUGH").is_err());
         }
-        // Guard dropped — was absent before, should remain absent.
         assert!(std::env::var("TMUXPASSTHROUGH").is_err());
+
+        // Cleanup
+        let _ = std::env::remove_var("TMUXPASSTHROUGH");
     }
 }

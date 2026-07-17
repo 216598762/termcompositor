@@ -88,7 +88,7 @@ pub use geometry::Rect;
 pub use layer::ImageLayer;
 #[cfg(feature = "font-rasterizer")]
 pub use layer::FontSource;
-pub use layer::{BorderLayer, CanvasLayer, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};
+pub use layer::{BorderLayer, CanvasLayer, DropShadow, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};
 pub use terminal::TerminalSize;
 
 // Re-export the gated `ImageLayer` only when the feature is on; the

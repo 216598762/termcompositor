@@ -1010,6 +1010,202 @@ impl Layer for CanvasLayer {
     }
 }
 
+/// A wrapper layer that adds a drop shadow behind any inner layer.
+///
+/// `DropShadow` renders the inner layer into a temporary buffer,
+/// applies a box blur to create the shadow, composites the blurred
+/// shadow at an offset, then composites the original layer on top.
+///
+/// # Example
+///
+/// ```
+/// use termcompositor::{DropShadow, RectLayer, Layer, LayerStack};
+/// use termcompositor::FrameBuffer;
+///
+/// let inner = RectLayer::new(5, 5, 10, 5, [255, 255, 255, 255]);
+/// let shadow = DropShadow::new(Box::new(inner))
+///     .with_offset(2, 2)
+///     .with_blur(3)
+///     .with_shadow_color([0, 0, 0, 128]);
+///
+/// let mut fb = FrameBuffer::new(30, 20);
+/// shadow.render(&mut fb, (0, 0), 1.0);
+/// ```
+pub struct DropShadow {
+    inner: Box<dyn Layer>,
+    /// Shadow offset in pixels (x, y).
+    pub offset: (i32, i32),
+    /// Box blur radius in pixels. Higher values produce softer shadows.
+    pub blur_radius: u32,
+    /// Shadow colour `[R, G, B, A]`.
+    pub shadow_color: [u8; 4],
+    z: u32,
+    name: String,
+}
+
+impl DropShadow {
+    /// Creates a new drop shadow wrapper around the given layer.
+    pub fn new(inner: Box<dyn Layer>) -> Self {
+        Self {
+            inner,
+            offset: (2, 2),
+            blur_radius: 2,
+            shadow_color: [0, 0, 0, 80],
+            z: 0,
+            name: "DropShadow".to_owned(),
+        }
+    }
+
+    /// Builder: sets the shadow offset in pixels.
+    #[must_use]
+    pub fn with_offset(mut self, x: i32, y: i32) -> Self {
+        self.offset = (x, y);
+        self
+    }
+
+    /// Builder: sets the box blur radius.
+    #[must_use]
+    pub fn with_blur(mut self, radius: u32) -> Self {
+        self.blur_radius = radius;
+        self
+    }
+
+    /// Builder: sets the shadow colour.
+    #[must_use]
+    pub fn with_shadow_color(mut self, color: [u8; 4]) -> Self {
+        self.shadow_color = color;
+        self
+    }
+
+    /// Builder: sets the default z-order.
+    #[must_use]
+    pub fn with_z(mut self, z: u32) -> Self {
+        self.z = z;
+        self
+    }
+
+    /// Builder: sets a human-readable name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Returns a reference to the inner layer.
+    pub fn inner(&self) -> &dyn Layer {
+        &*self.inner
+    }
+
+    /// Applies a simple box blur to the pixel buffer in-place.
+    /// Uses a square kernel of size (2*radius+1) x (2*radius+1).
+    fn box_blur(pixels: &mut [[u8; 4]], width: u32, height: u32, radius: u32) {
+        if radius == 0 || width == 0 || height == 0 {
+            return;
+        }
+        let w = width as usize;
+        let h = height as usize;
+        let r = radius as usize;
+        let mut tmp = vec![[0u8; 4]; w * h];
+
+        // Horizontal pass
+        for y in 0..h {
+            for x in 0..w {
+                let mut sum = [0u32; 4];
+                let mut count = 0u32;
+                for kx in x.saturating_sub(r)..=(x + r).min(w - 1) {
+                    let p = pixels[y * w + kx];
+                    for c in 0..4 {
+                        sum[c] += p[c] as u32;
+                    }
+                    count += 1;
+                }
+                for c in 0..4 {
+                    tmp[y * w + x][c] = (sum[c] / count) as u8;
+                }
+            }
+        }
+
+        // Vertical pass
+        for y in 0..h {
+            for x in 0..w {
+                let mut sum = [0u32; 4];
+                let mut count = 0u32;
+                for ky in y.saturating_sub(r)..=(y + r).min(h - 1) {
+                    let p = tmp[ky * w + x];
+                    for c in 0..4 {
+                        sum[c] += p[c] as u32;
+                    }
+                    count += 1;
+                }
+                for c in 0..4 {
+                    pixels[y * w + x][c] = (sum[c] / count) as u8;
+                }
+            }
+        }
+    }
+}
+
+impl Layer for DropShadow {
+    fn z_order(&self) -> u32 {
+        self.z
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn bounds(&self) -> Option<Rect> {
+        self.inner.bounds()
+    }
+
+    fn render(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
+        let effective = opacity.clamp(0.0, 1.0);
+        if effective == 0.0 {
+            return;
+        }
+
+        let w = target.width();
+        let h = target.height();
+        if w == 0 || h == 0 {
+            return;
+        }
+
+        // Step 1: Render inner layer to a temporary buffer.
+        let mut shadow_buf = FrameBuffer::new(w, h);
+        self.inner.render(&mut shadow_buf, offset, 1.0);
+
+        // Step 2: Apply box blur to create the shadow.
+        Self::box_blur(shadow_buf.pixels_mut(), w, h, self.blur_radius);
+
+        // Step 3: Composite the blurred shadow at the offset.
+        let (sx, sy) = self.offset;
+        let sc = self.shadow_color;
+        for sy_row in 0..h {
+            for sx_col in 0..w {
+                let src = shadow_buf.pixels()[sy_row as usize * w as usize + sx_col as usize];
+                // Only composite where the inner layer had content.
+                if src[3] == 0 {
+                    continue;
+                }
+                // Apply shadow colour with its alpha.
+                let shadow_alpha = f32::from(sc[3]) / 255.0 * effective;
+                let dst_x = sx_col as i32 + sx;
+                let dst_y = sy_row as i32 + sy;
+                if dst_x >= 0 && dst_y >= 0 {
+                    let dx = dst_x as u32;
+                    let dy = dst_y as u32;
+                    if let Some(px) = target.get_pixel_mut(dx, dy) {
+                        crate::framebuffer::blend_over(px, &sc, shadow_alpha);
+                    }
+                }
+            }
+        }
+
+        // Step 4: Composite the original layer on top.
+        self.inner.render(target, offset, effective);
+    }
+}
+
 /// A gradient layer that interpolates between two colours.
 ///
 /// Supports two gradient types:
@@ -1375,7 +1571,7 @@ impl std::fmt::Debug for LayerEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{BorderLayer, CanvasLayer, GradientKind, GradientLayer, Layer, LayerEntry, RectLayer, SolidColor, TextLayer};
+    use super::{BorderLayer, CanvasLayer, DropShadow, GradientKind, GradientLayer, Layer, LayerEntry, RectLayer, SolidColor, TextLayer};
     use crate::framebuffer::FrameBuffer;
     use proptest::prelude::*;
     use crate::geometry::Rect;
@@ -2155,6 +2351,159 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── DropShadow tests ──────────────────────────────────────────────────'
+
+    #[test]
+    fn drop_shadow_new_defaults() {
+        let inner = RectLayer::new(0, 0, 5, 5, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner));
+        assert_eq!(ds.z_order(), 0);
+        assert_eq!(ds.offset, (2, 2));
+        assert_eq!(ds.blur_radius, 2);
+        assert_eq!(ds.shadow_color, [0, 0, 0, 80]);
+    }
+
+    #[test]
+    fn drop_shadow_builders() {
+        let inner = RectLayer::new(0, 0, 5, 5, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(3, 4)
+            .with_blur(5)
+            .with_shadow_color([255, 0, 0, 128])
+            .with_z(10)
+            .with_name("my-shadow");
+        assert_eq!(ds.offset, (3, 4));
+        assert_eq!(ds.blur_radius, 5);
+        assert_eq!(ds.shadow_color, [255, 0, 0, 128]);
+        assert_eq!(ds.z_order(), 10);
+        assert_eq!(ds.name(), "my-shadow");
+    }
+
+    #[test]
+    fn drop_shadow_inner_reference() {
+        let inner = RectLayer::new(0, 0, 5, 5, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner));
+        assert!(ds.inner().bounds().is_some());
+    }
+
+    #[test]
+    fn drop_shadow_render_produces_content() {
+        let inner = RectLayer::new(5, 5, 5, 5, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(2, 2)
+            .with_blur(1)
+            .with_shadow_color([0, 0, 0, 200]);
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 1.0);
+        // Should have some non-transparent pixels.
+        let has_content = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_content, "render must produce content");
+    }
+
+    #[test]
+    fn drop_shadow_renders_original_on_top() {
+        // The original rect at (5,5) should be white.
+        let inner = RectLayer::new(5, 5, 3, 3, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(2, 2)
+            .with_blur(0)
+            .with_shadow_color([0, 0, 0, 255]);
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 1.0);
+        // Original rect should be white (on top).
+        let px = fb.get_pixel(5, 5).unwrap();
+        assert_eq!(px[0], 255, "R should be 255 at original position");
+        assert_eq!(px[1], 255, "G should be 255 at original position");
+        assert_eq!(px[2], 255, "B should be 255 at original position");
+    }
+
+    #[test]
+    fn drop_shadow_zero_opacity_is_noop() {
+        let inner = RectLayer::new(5, 5, 5, 5, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner));
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 0.0);
+        for px in fb.pixels() {
+            assert_eq!(*px, [0, 0, 0, 0]);
+        }
+    }
+
+    #[test]
+    fn drop_shadow_offset_translates_shadow() {
+        // With offset (2, 2), shadow should appear at (7,7) when rect is at (5,5).
+        let inner = RectLayer::new(5, 5, 2, 2, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(2, 2)
+            .with_blur(0)
+            .with_shadow_color([0, 0, 0, 255]);
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 1.0);
+        // Shadow at offset position (7,7) should have black.
+        let shadow_px = fb.get_pixel(7, 7).unwrap();
+        assert_eq!(shadow_px[0], 0, "shadow R should be 0");
+        assert_eq!(shadow_px[1], 0, "shadow G should be 0");
+        assert_eq!(shadow_px[2], 0, "shadow B should be 0");
+        assert!(shadow_px[3] > 0, "shadow alpha should be > 0");
+    }
+
+    #[test]
+    fn drop_shadow_blur_softens_edges() {
+        // With blur, the shadow area should be larger than without blur.
+        let inner = RectLayer::new(10, 10, 2, 2, [255, 255, 255, 255]);
+        let mut ds_no_blur = DropShadow::new(Box::new(inner.clone()))
+            .with_offset(3, 3)
+            .with_blur(0)
+            .with_shadow_color([0, 0, 0, 255]);
+        let mut fb1 = FrameBuffer::new(20, 20);
+        ds_no_blur.render(&mut fb1, (0, 0), 1.0);
+        let count_no_blur: usize = fb1.pixels().iter().filter(|p| p[3] > 0).count();
+
+        let ds_blur = DropShadow::new(Box::new(inner))
+            .with_offset(3, 3)
+            .with_blur(2)
+            .with_shadow_color([0, 0, 0, 255]);
+        let mut fb2 = FrameBuffer::new(20, 20);
+        ds_blur.render(&mut fb2, (0, 0), 1.0);
+        let count_blur: usize = fb2.pixels().iter().filter(|p| p[3] > 0).count();
+
+        assert!(count_blur > count_no_blur, "blur should expand shadow area: {} <= {}", count_blur, count_no_blur);
+    }
+
+    #[test]
+    fn drop_shadow_box_blur_zero_radius_noop() {
+        let mut pixels = vec![[0u16 as u8; 4]; 4];
+        pixels[0] = [100, 100, 100, 255];
+        let before = pixels.clone();
+        DropShadow::box_blur(&mut pixels, 2, 2, 0);
+        assert_eq!(pixels, before, "zero radius blur should not change pixels");
+    }
+
+    #[test]
+    fn drop_shadow_box_blur_averages_neighbours() {
+        // 3x3 buffer with center pixel set.
+        let mut pixels = vec![[0u8; 4]; 9];
+        pixels[4] = [255, 255, 255, 255]; // center
+        DropShadow::box_blur(&mut pixels, 3, 3, 1);
+        // After blur with radius=1, all pixels should have some value.
+        for px in &pixels {
+            assert!(px[0] > 0, "all pixels should have value after blur, got {:?}", px);
+        }
+    }
+
+    #[test]
+    fn drop_shadow_with_solid_color_layer() {
+        let inner = SolidColor::new(200, 200, 200, 255);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(1, 1)
+            .with_blur(1)
+            .with_shadow_color([0, 0, 0, 128]);
+        let mut fb = FrameBuffer::new(10, 10);
+        ds.render(&mut fb, (0, 0), 1.0);
+        // Both shadow and original should produce content.
+        let has_content = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_content, "should produce content");
     }
 
     // ── BorderLayer tests ───────────────────────────────────────────────'
