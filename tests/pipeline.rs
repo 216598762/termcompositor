@@ -11,7 +11,7 @@
 //! - `encode_passthrough_to_writer()`
 
 use termcompositor::{
-    dispatch_to_writer, detect, CanvasLayer, DropShadow, FrameBuffer, LayerStack, Protocol, ProtocolEncoder, RectLayer,
+    dispatch_to_writer, detect, BorderLayer, CanvasLayer, GradientLayer, DropShadow, FrameBuffer, LayerStack, Protocol, ProtocolEncoder, RectLayer,
     SolidColor, TextLayer,
 };
 
@@ -531,5 +531,153 @@ mod shadow_pipeline {
         assert!(!bytes.is_empty(), "Sixel shadow output must not be empty");
         // Original rect at (5,5) should be white.
         assert_eq!(fb.get_pixel(5, 5), Some(&[255, 255, 255, 255]));
+    }
+}
+
+// -- GradientLayer pipeline tests ---------------------------------
+
+#[cfg(all(feature = "kitty-encoder", feature = "sixel-encoder"))]
+mod gradient_pipeline {
+    use super::*;
+
+    #[test]
+    fn kitty_gradient_layer_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
+        stack.push(
+            GradientLayer::linear(
+                0, 0, 20, 10,
+                [255, 0, 0, 255], [0, 0, 255, 255],
+                0, 0, 20, 10,
+            )
+            .with_z(10),
+        );
+
+        let mut fb = FrameBuffer::new(20, 10);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Kitty.encode(&fb).unwrap();
+        assert!(bytes.starts_with(b"\x1b_G"));
+        assert!(bytes.ends_with(b"\x1b\\"));
+        // Verify the gradient produced non-uniform pixels.
+        let top_left = fb.get_pixel(0, 0).unwrap();
+        let top_right = fb.get_pixel(19, 0).unwrap();
+        assert_ne!(
+            top_left[0], top_right[0],
+            "gradient must produce different R values at edges"
+        );
+    }
+
+    #[test]
+    fn kitty_gradient_layer_radial_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(
+            GradientLayer::radial(
+                0, 0, 20, 20,
+                [255, 255, 255, 255], [0, 0, 0, 255],
+                10, 10, 10,
+            )
+            .with_z(5),
+        );
+
+        let mut fb = FrameBuffer::new(20, 20);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Kitty.encode(&fb).unwrap();
+        assert!(bytes.starts_with(b"\x1b_G"));
+        // Center should differ from corner.
+        let center = fb.get_pixel(10, 10).unwrap();
+        let corner = fb.get_pixel(0, 0).unwrap();
+        assert_ne!(
+            center, corner,
+            "radial gradient must produce different pixels at center vs corner"
+        );
+    }
+
+    #[test]
+    fn sixel_gradient_layer_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
+        stack.push(
+            GradientLayer::linear(
+                0, 0, 20, 10,
+                [255, 0, 0, 255], [0, 0, 255, 255],
+                0, 0, 20, 10,
+            )
+            .with_z(10),
+        );
+
+        let mut fb = FrameBuffer::new(20, 10);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Sixel.encode(&fb).unwrap();
+        assert!(!bytes.is_empty(), "Sixel gradient output must not be empty");
+    }
+
+    #[test]
+    fn sixel_gradient_layer_radial_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(
+            GradientLayer::radial(
+                0, 0, 20, 20,
+                [255, 255, 255, 255], [0, 0, 0, 255],
+                10, 10, 10,
+            )
+            .with_z(5),
+        );
+
+        let mut fb = FrameBuffer::new(20, 20);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Sixel.encode(&fb).unwrap();
+        assert!(!bytes.is_empty(), "Sixel radial gradient output must not be empty");
+    }
+}
+
+// -- BorderLayer pipeline tests -----------------------------------
+
+#[cfg(all(feature = "kitty-encoder", feature = "sixel-encoder"))]
+mod border_pipeline {
+    use super::*;
+
+    #[test]
+    fn kitty_border_layer_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
+        stack.push(
+            BorderLayer::new(2, 2, 6, 4, [255, 200, 0, 255], 1)
+                .with_z(10),
+        );
+
+        let mut fb = FrameBuffer::new(20, 10);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Kitty.encode(&fb).unwrap();
+        assert!(bytes.starts_with(b"\x1b_G"));
+        assert!(bytes.ends_with(b"\x1b\\"));
+        // Border edge should be the border colour.
+        assert_eq!(fb.get_pixel(2, 2), Some(&[255, 200, 0, 255]));
+        // Interior should be the background colour (solid blue).
+        assert_eq!(fb.get_pixel(4, 3), Some(&[0, 0, 64, 255]));
+    }
+
+    #[test]
+    fn sixel_border_layer_pipeline() {
+        let mut stack = LayerStack::new();
+        stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
+        stack.push(
+            BorderLayer::new(1, 1, 8, 6, [0, 255, 200, 255], 2)
+                .with_z(10),
+        );
+
+        let mut fb = FrameBuffer::new(20, 10);
+        stack.render(&mut fb);
+
+        let bytes = Protocol::Sixel.encode(&fb).unwrap();
+        assert!(!bytes.is_empty(), "Sixel border output must not be empty");
+        // Border edge should be the border colour.
+        assert_eq!(fb.get_pixel(1, 1), Some(&[0, 255, 200, 255]));
+        // Interior should be black (background).
+        assert_eq!(fb.get_pixel(4, 3), Some(&[0, 0, 0, 255]));
     }
 }
