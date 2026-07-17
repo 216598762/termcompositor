@@ -34,6 +34,7 @@ coverage/
 .cache/
 .tmp/
 cov.txt
+proptest-regressions/
 
 # Rust
 target/
