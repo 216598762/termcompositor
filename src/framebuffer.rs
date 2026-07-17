@@ -165,6 +165,7 @@ pub fn blend_over(dst: &mut [u8; 4], src: &[u8; 4], src_alpha: f32) {
 #[cfg(test)]
 mod tests {
     use super::{blend_over, FrameBuffer};
+    use proptest::prelude::*;
 
     #[test]
     fn empty_framebuffer_is_zero_sized_pixels() {
@@ -228,5 +229,205 @@ mod tests {
             *px = [9, 8, 7, 6];
         }
         assert_eq!(fb.get_pixel(1, 1), Some(&[9, 8, 7, 6]));
+    }
+
+    // -- Property-based tests (proptest) ------------------------
+
+    proptest::proptest! {
+        #[test]
+        fn framebuffer_new_pixel_count_matches_dimensions(
+            w in 0u32..1000,
+            h in 0u32..1000,
+        ) {
+            let fb = FrameBuffer::new(w, h);
+            // The pixel count must always equal w * h (saturating).
+            let expected = (w as usize).saturating_mul(h as usize);
+            prop_assert_eq!(fb.pixels().len(), expected);
+        }
+
+        #[test]
+        fn framebuffer_new_all_pixels_transparent(
+            w in 0u32..500,
+            h in 0u32..500,
+        ) {
+            let fb = FrameBuffer::new(w, h);
+            prop_assert!(
+                fb.pixels().iter().all(|p| *p == [0, 0, 0, 0]),
+                "all pixels must be transparent after creation"
+            );
+        }
+
+        #[test]
+        fn framebuffer_width_height_preserved(
+            w in 0u32..1000,
+            h in 0u32..1000,
+        ) {
+            let fb = FrameBuffer::new(w, h);
+            prop_assert_eq!(fb.width(), w);
+            prop_assert_eq!(fb.height(), h);
+        }
+
+        #[test]
+        fn framebuffer_get_pixel_in_bounds_always_some(
+            w in 1u32..100,
+            h in 1u32..100,
+            x in 0u32..100,
+            y in 0u32..100,
+        ) {
+            let fb = FrameBuffer::new(w, h);
+            if x < w && y < h {
+                prop_assert!(fb.get_pixel(x, y).is_some());
+            }
+        }
+
+        #[test]
+        fn framebuffer_get_pixel_out_of_bounds_always_none(
+            w in 1u32..100,
+            h in 1u32..100,
+        ) {
+            let fb = FrameBuffer::new(w, h);
+            // Any coordinate >= width or >= height must be None.
+            prop_assert_eq!(fb.get_pixel(w, 0), None);
+            prop_assert_eq!(fb.get_pixel(0, h), None);
+            prop_assert_eq!(fb.get_pixel(w, h), None);
+            prop_assert_eq!(fb.get_pixel(u32::MAX, 0), None);
+            prop_assert_eq!(fb.get_pixel(0, u32::MAX), None);
+        }
+
+        #[test]
+        fn framebuffer_set_then_get_round_trip(
+            w in 1u32..50,
+            h in 1u32..50,
+            x in 0u32..50,
+            y in 0u32..50,
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+            a in 0u8..=255,
+        ) {
+            let mut fb = FrameBuffer::new(w, h);
+            if x < w && y < h {
+                if let Some(px) = fb.get_pixel_mut(x, y) {
+                    *px = [r, g, b, a];
+                }
+                prop_assert_eq!(fb.get_pixel(x, y), Some(&[r, g, b, a]));
+            }
+        }
+
+        #[test]
+        fn framebuffer_clear_resets_all_pixels(
+            w in 1u32..50,
+            h in 1u32..50,
+        ) {
+            let mut fb = FrameBuffer::new(w, h);
+            // Write non-zero values to every pixel.
+            for px in fb.pixels_mut() {
+                *px = [128, 64, 32, 255];
+            }
+            fb.clear();
+            prop_assert!(
+                fb.pixels().iter().all(|p| *p == [0, 0, 0, 0]),
+                "clear must reset all pixels to transparent"
+            );
+        }
+
+        #[test]
+        fn prop_blend_zero_alpha_is_noop(
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+            a in 0u8..=255,
+            dr in 0u8..=255,
+            dg in 0u8..=255,
+            db in 0u8..=255,
+            da in 0u8..=255,
+        ) {
+            let mut dst = [dr, dg, db, da];
+            blend_over(&mut dst, &[r, g, b, a], 0.0);
+            prop_assert_eq!(dst, [dr, dg, db, da], "blend with alpha=0 must not modify dst");
+        }
+
+        #[test]
+        fn prop_blend_opaque_overwrites_rgb(
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+        ) {
+            let mut dst = [0u8; 4];
+            blend_over(&mut dst, &[r, g, b, 0], 1.0);
+            // src_alpha=1.0 means the source colour is written directly;
+            // the result is fully opaque regardless of src[3].
+            prop_assert_eq!(dst[0], r, "red channel must match");
+            prop_assert_eq!(dst[1], g, "green channel must match");
+            prop_assert_eq!(dst[2], b, "blue channel must match");
+            prop_assert_eq!(dst[3], 255, "result must be fully opaque when src_alpha=1.0");
+        }
+
+        #[test]
+        fn prop_blend_result_alpha_bounded(
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+            a in 0u8..=255,
+            dr in 0u8..=255,
+            dg in 0u8..=255,
+            db in 0u8..=255,
+            da in 0u8..=255,
+            src_alpha in 0.0f32..=1.0,
+        ) {
+            let mut dst = [dr, dg, db, da];
+            blend_over(&mut dst, &[r, g, b, a], src_alpha);
+            // Result alpha must be in [0, 255].
+            prop_assert!(dst[3] <= 255, "result alpha {} must be <= 255", dst[3]);
+        }
+
+        #[test]
+        fn prop_blend_result_rgb_bounded(
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+            a in 0u8..=255,
+            dr in 0u8..=255,
+            dg in 0u8..=255,
+            db in 0u8..=255,
+            da in 0u8..=255,
+            src_alpha in 0.0f32..=1.0,
+        ) {
+            let mut dst = [dr, dg, db, da];
+            blend_over(&mut dst, &[r, g, b, a], src_alpha);
+            for i in 0..3 {
+                prop_assert!(dst[i] <= 255, "channel {} result {} must be <= 255", i, dst[i]);
+            }
+        }
+
+        #[test]
+        fn prop_blend_clamps_extreme_alpha_values(
+            r in 0u8..=255,
+            g in 0u8..=255,
+            b in 0u8..=255,
+            a in 0u8..=255,
+            dr in 0u8..=255,
+            dg in 0u8..=255,
+            db in 0u8..=255,
+            da in 0u8..=255,
+            extreme_alpha in (-100.0f32..100.0).prop_filter("extreme", |a| *a < 0.0 || *a > 1.0),
+        ) {
+            let mut dst = [dr, dg, db, da];
+            let before = dst;
+            blend_over(&mut dst, &[r, g, b, a], extreme_alpha);
+            // Result must be valid u8 values.
+            for i in 0..4 {
+                prop_assert!(dst[i] <= 255, "channel {} must be <= 255", i);
+            }
+            if extreme_alpha <= 0.0 {
+                // Negative alpha is clamped to 0 → noop.
+                prop_assert_eq!(dst, before, "negative alpha must be noop");
+            } else {
+                // Alpha > 1.0 is clamped to 1.0 → full overwrite.
+                let mut expected = [0u8; 4];
+                blend_over(&mut expected, &[r, g, b, a], 1.0);
+                prop_assert_eq!(dst, expected, "alpha > 1.0 must behave like alpha == 1.0");
+            }
+        }
     }
 }

@@ -76,6 +76,9 @@ criterion = { version = "0.5", default-features = false }
 # tempfile is used by the ImageLayer::from_path tests to create
 # temporary PNG files on disk.
 tempfile = "3"
+# proptest is used for property-based testing of FrameBuffer
+# and blend_over edge cases.
+proptest = "1"
 
 [[bench]]
 name = "compositor"

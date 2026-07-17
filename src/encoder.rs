@@ -3326,5 +3326,304 @@ mod tests {
         assert!(!opaque.is_fully_transparent());
     }
 
+    // ── EncoderError Display ───────────────────────────────────
+
+    #[test]
+    fn encoder_error_display_encode_variant() {
+        let err = EncoderError::Encode("something went wrong".to_string());
+        assert_eq!(err.to_string(), "encoder failed: something went wrong");
+    }
+
+    #[test]
+    fn encoder_error_display_unsupported_protocol_variant() {
+        let err = EncoderError::UnsupportedProtocol("kitty");
+        assert_eq!(
+            err.to_string(),
+            "protocol kitty is not supported in this build"
+        );
+    }
+
+    #[test]
+    fn encoder_error_display_invalid_dimensions_variant() {
+        let err = EncoderError::InvalidDimensions {
+            width: 0,
+            height: 5,
+        };
+        assert_eq!(
+            err.to_string(),
+            "framebuffer has invalid dimensions: 0x5"
+        );
+    }
+
+    #[test]
+    fn encoder_error_is_std_error() {
+        let err: Box<dyn std::error::Error> =
+            Box::new(EncoderError::Encode("test".to_string()));
+        assert!(err.to_string().contains("encoder failed"));
+        assert!(err.source().is_none());
+    }    // ── From<std::io::Error> conversion ────────────────────────
+    #[cfg(any(feature = "kitty-encoder", feature = "sixel-encoder"))]
+    #[test]
+    fn from_io_error_converts_to_encode() {
+        let io_err =
+            std::io::Error::new(std::io::ErrorKind::Other, "write failed");
+        let enc_err: EncoderError = io_err.into();
+        match enc_err {
+            EncoderError::Encode(msg) => {
+                assert!(msg.contains("write failed"))
+            }
+            _ => panic!("expected EncoderError::Encode"),
+        }
+    }
+
+    // ── tmux_passthrough_enabled ───────────────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn tmux_passthrough_requires_both_env_vars() {
+        let _lock = env_lock();
+        let _g1 = EnvGuard::new("DASHPASSTHROUGH");
+        let _g2 = EnvGuard::new("TMUX");
+
+        // Neither set
+        std::env::remove_var("DASHPASSTHROUGH");
+        std::env::remove_var("TMUX");
+        assert!(!super::tmux_passthrough_enabled());
+
+        // Only DASHPASSTHROUGH set
+        _g1.set(Some("1"));
+        assert!(!super::tmux_passthrough_enabled());
+
+        // Only TMUX set
+        _g1.set(None);
+        _g2.set(Some("/tmp/tmux-1000/default,12345,0"));
+        assert!(!super::tmux_passthrough_enabled());
+
+        // Both set
+        _g1.set(Some("1"));
+        assert!(super::tmux_passthrough_enabled());
+
+        // Empty DASHPASSTHROUGH should NOT enable
+        _g1.set(Some(""));
+        assert!(!super::tmux_passthrough_enabled());
+    }
+
+    // ── wrap_for_tmux ESC doubling ──────────────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_wrap_for_tmux_doubles_esc_bytes() {
+        let inner = vec![0x1b, b'_', b'G', 0x1b, 0x5c, 0x1b];
+        let wrapped = super::kitty::wrap_for_tmux(inner.clone());
+        // Should contain the DCS prefix and suffix
+        assert!(
+            wrapped
+                .windows(7)
+                .any(|w| w == b"\x1bPtmux;")
+        );
+        assert!(wrapped.windows(2).any(|w| w == b"\x1b\\"));
+        // Inner ESC bytes should be doubled: 3 ESCs -> 6, plus prefix
+        // (1) + suffix (1) = 8 total
+        let inner_esc_count = inner.iter().filter(|&&b| b == 0x1b).count();
+        let wrapped_esc_count =
+            wrapped.iter().filter(|&&b| b == 0x1b).count();
+        assert_eq!(wrapped_esc_count, inner_esc_count * 2 + 2);
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_wrap_for_tmux_empty_input() {
+        let wrapped = super::kitty::wrap_for_tmux(vec![]);
+        assert_eq!(wrapped, b"\x1bPtmux;\x1b\\");
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_wrap_for_tmux_to_writer_matches_wrap_for_tmux() {
+        let inner = vec![0x1b, b'A', 0x1b, b'B', b'C'];
+        let via_fn = super::kitty::wrap_for_tmux(inner.clone());
+        let mut via_writer = Vec::new();
+        super::kitty::wrap_for_tmux_to_writer(&inner, &mut via_writer)
+            .unwrap();
+        assert_eq!(via_fn, via_writer);
+    }
+
+    // ── PassthroughWriter ───────────────────────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_passthrough_writer_empty_body() {
+        use std::io::Write;
+        let mut out = Vec::new();
+        let pw = super::kitty::PassthroughWriter::new(&mut out);
+        let _inner = pw.finish().unwrap();
+        assert_eq!(out, b"\x1bPtmux;\x1b\\");
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_passthrough_writer_with_body_doubles_esc() {
+        use std::io::Write;
+        let mut out = Vec::new();
+        {
+            let mut pw = super::kitty::PassthroughWriter::new(&mut out);
+            pw.write_all(b"hello").unwrap();
+            pw.write_all(&[0x1b, b'X']).unwrap();
+            let _inner = pw.finish().unwrap();
+        }
+        assert!(out.starts_with(b"\x1bPtmux;"));
+        assert!(out.ends_with(b"\x1b\\"));
+        assert!(out.windows(5).any(|w| w == b"hello"));
+        assert!(out.windows(3).any(|w| w == b"\x1b\x1bX"));
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_passthrough_writer_flush_delegates() {
+        use std::io::Write;
+        let mut out = Vec::new();
+        let mut pw = super::kitty::PassthroughWriter::new(&mut out);
+        pw.write_all(b"test").unwrap();
+        pw.flush().unwrap();
+        assert!(!out.is_empty());
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_passthrough_writer_returns_inner_on_finish() {
+        use std::io::Write;
+        let mut out = Vec::new();
+        let pw = super::kitty::PassthroughWriter::new(&mut out);
+        let mut returned = pw.finish().unwrap();
+        // Returned writer should still be usable
+        returned.write_all(b"after").unwrap();
+        assert!(out.starts_with(b"\x1bPtmux;"));
+        assert!(out.ends_with(b"after"));
+    }
+
+    // ── encode_passthrough_to_writer without tmux ───────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_passthrough_to_writer_no_tmux_matches_encode_to_writer() {
+        let _lock = env_lock();
+        let _g1 = EnvGuard::new("DASHPASSTHROUGH");
+        let _g2 = EnvGuard::new("TMUX");
+        _g1.set(None);
+        _g2.set(None);
+
+        let fb = FrameBuffer::new(2, 2);
+        let mut out_passthrough = Vec::new();
+        let mut out_regular = Vec::new();
+        super::kitty::encode_passthrough_to_writer(
+            &fb,
+            &mut out_passthrough,
+        )
+        .unwrap();
+        super::kitty::encode_to_writer(&fb, &mut out_regular).unwrap();
+        assert_eq!(out_passthrough, out_regular);
+    }
+
+    // ── sixel encode_to_writer_streaming invalid dimensions ──────
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_streaming_rejects_zero_width() {
+        let fb = FrameBuffer::new(0, 10);
+        let mut out = Vec::new();
+        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            EncoderError::InvalidDimensions {
+                width: 0,
+                height: 10
+            }
+        ));
+    }
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_streaming_rejects_zero_height() {
+        let fb = FrameBuffer::new(10, 0);
+        let mut out = Vec::new();
+        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            EncoderError::InvalidDimensions {
+                width: 10,
+                height: 0
+            }
+        ));
+    }
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_streaming_produces_valid_dcs() {
+        let fb = FrameBuffer::new(4, 4);
+        let mut out = Vec::new();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out)
+            .unwrap();
+        assert!(!out.is_empty());
+        // Should start with DCS header
+        assert!(out.starts_with(b"\x1bP"));
+    }
+
+    // ── ProtocolEncoder trait dispatch ───────────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn protocol_encoder_kitty_encode_produces_output() {
+        let fb = FrameBuffer::new(2, 2);
+        let result = Protocol::Kitty.encode(&fb);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn protocol_encoder_sixel_encode_produces_output() {
+        let fb = FrameBuffer::new(2, 2);
+        let result = Protocol::Sixel.encode(&fb);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    // ── dispatch_to_writer explicit protocols ────────────────────
+
+    // ── kitty multi-chunk boundary ──────────────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_exact_boundary_single_chunk() {
+        let fb = FrameBuffer::new(768, 1);
+        let result = super::kitty::encode(&fb);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn kitty_encode_one_over_boundary_multi_chunk() {
+        let fb = FrameBuffer::new(769, 1);
+        let result = super::kitty::encode(&fb);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    // ── From<std::io::Error> for EncoderError ────────────────────
+
+    #[cfg(feature = "kitty-encoder")]
+    #[test]
+    fn io_error_converts_to_encoder_error_encode() {
+        let io_err =
+            std::io::Error::new(std::io::ErrorKind::Other, "disk full");
+        let enc_err: EncoderError = io_err.into();
+        assert_eq!(
+            enc_err.to_string(),
+            "encoder failed: disk full"
+        );
+    }
 
 }
