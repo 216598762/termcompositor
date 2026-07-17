@@ -1679,6 +1679,7 @@ pub struct LayerEntry {
     visible: bool,
     z_override: Option<u32>,
     name: Option<String>,
+    transform: Option<crate::geometry::Transform>,
 }
 
 impl LayerEntry {
@@ -1693,6 +1694,7 @@ impl LayerEntry {
             visible: true,
             z_override: None,
             name: None,
+            transform: None,
         }
     }
 
@@ -1756,6 +1758,28 @@ impl LayerEntry {
     /// Sets a custom name for this entry.
     pub fn set_name(&mut self, name: impl Into<String>) {
         self.name = Some(name.into());
+    }
+
+    /// Returns a reference to the transform, if set.
+    pub fn transform(&self) -> Option<&crate::geometry::Transform> {
+        self.transform.as_ref()
+    }
+
+    /// Returns a mutable reference to the transform, if set.
+    pub fn transform_mut(&mut self) -> Option<&mut crate::geometry::Transform> {
+        self.transform.as_mut()
+    }
+
+    /// Sets the transform for this entry. Pass `None` to clear.
+    pub fn set_transform(&mut self, transform: Option<crate::geometry::Transform>) {
+        self.transform = transform;
+    }
+
+    /// Builder: sets the transform for this entry.
+    #[must_use]
+    pub fn with_transform(mut self, transform: crate::geometry::Transform) -> Self {
+        self.transform = Some(transform);
+        self
     }
 
     /// Consumes the entry and returns the wrapped layer.

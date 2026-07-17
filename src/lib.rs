@@ -53,6 +53,7 @@
 //! | [`layer`]     | Layer trait, all built-in layer types |
 //! | [`terminal`]  | [`TerminalSize`] detection |
 
+pub mod animation;
 pub mod compositor;
 pub mod encoder;
 pub mod framebuffer;
@@ -83,13 +84,16 @@ pub use encoder::encode_passthrough_to_writer;
 // module-path access is more explicit anyway.
 pub use encoder::{detect, dispatch_to_writer, EncoderError, Protocol, ProtocolEncoder};
 pub use framebuffer::{blend_over, FrameBuffer};
-pub use geometry::Rect;
+pub use geometry::{Rect, Transform};
 #[cfg(feature = "image-decoder")]
 pub use layer::ImageLayer;
 #[cfg(feature = "font-rasterizer")]
 pub use layer::FontSource;
 pub use layer::{BorderLayer, CanvasLayer, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};
 pub use terminal::TerminalSize;
+
+// Re-export animation module at crate root for convenience.
+pub use animation::{run, run_with_config, run_with_stack, AnimConfig, AnimContext};
 
 // Re-export the gated `ImageLayer` only when the feature is on; the
 // other layer types are always available.

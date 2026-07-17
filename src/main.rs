@@ -29,12 +29,16 @@
 //! before calling `detect` / `dispatch`, so the resulting
 //! protocol + wrapping decision matches the one a user would
 //! get by exporting the var themselves.
+//!
+//! v0.14.0 adds `--animate` and `--fps <N>`: enters the
+//! animation loop with a live demo of the layer control API.
 
 use std::io::Write;
 
 use termcompositor::{
     detect, LayerStack, Protocol, ProtocolEncoder, RectLayer, SolidColor, TerminalSize, TextLayer,
 };
+use termcompositor::animation::{self, AnimConfig};
 // `detect_with_probe` is only re-exported from `termcompositor`
 // when the `kitty-encoder` Cargo feature is enabled (because the
 // probe depends on `little_kitty`). Gate the import accordingly
@@ -77,6 +81,25 @@ fn parse_tmux_passthrough_flag_from(args: &[String]) -> bool {
     args.iter().any(|a| a == "--tmux-passthrough")
 }
 
+/// Parse the `--animate` CLI flag (v0.14.0; boolean switch, no
+/// value) from the given argument list.
+fn parse_animate_flag_from(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--animate")
+}
+
+/// Parse the `--fps <N>` CLI flag from the given argument list.
+/// Returns `None` if the flag is absent.
+fn parse_fps_flag_from(args: &[String]) -> Option<f64> {
+    let idx = args.iter().position(|a| a == "--fps")?;
+    match args.get(idx + 1) {
+        Some(v) => v.parse::<f64>().ok().filter(|f| *f > 0.0),
+        None => {
+            eprintln!("warning: --fps missing value; using default 30");
+            Some(30.0)
+        }
+    }
+}
+
 /// RAII guard for the `TMUXPASSTHROUGH` env var set by
 /// `--tmux-passthrough`. Saves the current value on
 /// construction and restores it on `Drop`. Uses
@@ -106,7 +129,9 @@ impl Drop for TmuxPassthroughGuard {
             None => std::env::remove_var("TMUXPASSTHROUGH"),
         }
     }
-}/// Build the demo layer stack with background, centered rect,
+}
+
+/// Build the demo layer stack with background, centered rect,
 /// and text label. Returns the stack and the IDs of the
 /// background and rect layers (for post-render mutations).
 fn build_demo_stack(size: TerminalSize) -> (LayerStack, termcompositor::LayerId, termcompositor::LayerId) {
@@ -143,11 +168,10 @@ fn build_demo_stack(size: TerminalSize) -> (LayerStack, termcompositor::LayerId,
 }
 
 fn main() {
-
     let args: Vec<String> = std::env::args().collect();
     let size = TerminalSize::current();
     eprintln!(
-        "termcompositor v0.11.0 -- multi-layer + auto-detect encoder: \
+        "termcompositor v0.14.0 -- multi-layer + auto-detect encoder + animation: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,
@@ -176,35 +200,12 @@ host terminal = {cols} cols x {rows} rows",
         None
     };
 
-    let (mut stack, bg, rect) = build_demo_stack(size);
-
-    // 4. Auto-fit the framebuffer to the host terminal and render.
-    let (fb, reported) = stack.render_to_current_terminal();
-    assert_eq!(reported.cols as u32, fb.width());
-    assert_eq!(reported.rows as u32, fb.height());
-    eprintln!(
-        "rendered {}x{} framebuffer ({} pixels, {} layer(s))",
-        fb.width(), fb.height(),
-        fb.pixels().len(),
-        stack.len(),
-    );
-
-    // 5. Pick a protocol: explicit --protocol flag wins,
-    //    otherwise default to Auto (env-var shim, with --probe
-    //    upgrading to the I/O-based Kitty probe).
+    // Resolve protocol for both single-shot and animation modes.
     let requested = parse_protocol_flag_from(&args).unwrap_or(Protocol::Auto);
     let use_probe = parse_probe_flag_from(&args);
 
-    // The concrete protocol we will encode with. If `requested`
-    // is `Auto`, resolve it via the pure shim (or the probe if
-    // --probe was passed). The `Auto` arm of `encode` would do
-    // the same resolution, but resolving here lets us log the
-    // detected protocol before encoding.
     let resolved = match requested {
         Protocol::Auto if use_probe => {
-            // Authoritative detection via the Kitty probe.
-            // Only available when the kitty-encoder feature is
-            // enabled; without it, fall back to the env-var shim.
             #[cfg(feature = "kitty-encoder")]
             {
                 match detect_with_probe() {
@@ -242,6 +243,73 @@ using the env-var shim instead"
         } else {
             "disabled (set --tmux-passthrough or TMUXPASSTHROUGH=1 to opt in)"
         },
+    );
+
+    // Animation mode: if --animate was passed, enter the
+    // animation loop with a live demo. Ctrl+C to exit.
+    if parse_animate_flag_from(&args) {
+        let fps = parse_fps_flag_from(&args).unwrap_or(30.0);
+        eprintln!(
+            "entering animation mode at {fps:.0} FPS (Ctrl+C to exit)"
+        );
+
+        let mut stack = LayerStack::new();
+        let _bg = stack.push(
+            SolidColor::new(0, 0, 64, 255).with_z(0).with_name("anim-bg"),
+        );
+        let bar = stack.push(
+            RectLayer::new(2, 10, 20, 5, [0, 200, 0, 255])
+                .with_z(10)
+                .with_name("anim-bar"),
+        );
+        let _label = stack.push(
+            TextLayer::new(2, 1, "termcompositor v0.14.0 — animation demo", [255; 4])
+                .with_z(20)
+                .with_name("anim-title"),
+        );
+
+        let config = AnimConfig::new(fps)
+            .with_protocol(resolved)
+            .with_clear_between_frames(true);
+
+        animation::run_with_config(stack, config, move |ctx| {
+            let t = ctx.elapsed().as_secs_f32();
+
+            // Animate the bar opacity using a sine wave.
+            let opacity = (t * 2.0).sin() * 0.5 + 0.5;
+            if let Some(entry) = ctx.layers_mut().get_mut(bar) {
+                entry.set_opacity(opacity);
+            }
+
+            // Log frame info to stderr (stdout is for escape sequences).
+            if ctx.frame_count() % 30 == 0 {
+                eprintln!(
+                    "frame {} | dt={:?} | elapsed={:.1}s | {}x{}",
+                    ctx.frame_count(),
+                    ctx.delta_time(),
+                    ctx.elapsed().as_secs_f32(),
+                    ctx.width(),
+                    ctx.height(),
+                );
+            }
+
+            ctx.request_redraw();
+        });
+    }
+
+    // Single-shot demo mode (original behavior).
+    let (mut stack, bg, rect) = build_demo_stack(size);
+
+    // 4. Auto-fit the framebuffer to the host terminal and render.
+    let (fb, reported) = stack.render_to_current_terminal();
+    assert_eq!(reported.cols as u32, fb.width());
+    assert_eq!(reported.rows as u32, fb.height());
+    eprintln!(
+        "rendered {}x{} framebuffer ({} pixels, {} layer(s))",
+        fb.width(),
+        fb.height(),
+        fb.pixels().len(),
+        stack.len(),
     );
 
     // 6. Encode the framebuffer to escape sequences and write
@@ -390,6 +458,60 @@ mod tests {
         assert!(!parse_tmux_passthrough_flag_from(&args));
     }
 
+    // ── parse_animate_flag_from ───────────────────────────────
+
+    #[test]
+    fn parse_animate_present() {
+        let args: Vec<String> = vec!["--animate"].into_iter().map(String::from).collect();
+        assert!(parse_animate_flag_from(&args));
+    }
+
+    #[test]
+    fn parse_animate_absent() {
+        let args: Vec<String> = vec!["--protocol", "kitty"].into_iter().map(String::from).collect();
+        assert!(!parse_animate_flag_from(&args));
+    }
+
+    #[test]
+    fn parse_animate_with_fps() {
+        let args: Vec<String> = vec!["--animate", "--fps", "60"]
+            .into_iter().map(String::from).collect();
+        assert!(parse_animate_flag_from(&args));
+        assert_eq!(parse_fps_flag_from(&args), Some(60.0));
+    }
+
+    // ── parse_fps_flag_from ───────────────────────────────────
+
+    #[test]
+    fn parse_fps_present() {
+        let args: Vec<String> = vec!["--fps", "30"].into_iter().map(String::from).collect();
+        assert_eq!(parse_fps_flag_from(&args), Some(30.0));
+    }
+
+    #[test]
+    fn parse_fps_absent() {
+        let args: Vec<String> = vec!["--animate"].into_iter().map(String::from).collect();
+        assert_eq!(parse_fps_flag_from(&args), None);
+    }
+
+    #[test]
+    fn parse_fps_invalid_value() {
+        let args: Vec<String> = vec!["--fps", "abc"].into_iter().map(String::from).collect();
+        assert_eq!(parse_fps_flag_from(&args), None);
+    }
+
+    #[test]
+    fn parse_fps_zero_value() {
+        let args: Vec<String> = vec!["--fps", "0"].into_iter().map(String::from).collect();
+        assert_eq!(parse_fps_flag_from(&args), None);
+    }
+
+    #[test]
+    fn parse_fps_missing_value_warns() {
+        let args: Vec<String> = vec!["--fps"].into_iter().map(String::from).collect();
+        assert_eq!(parse_fps_flag_from(&args), Some(30.0));
+    }
+
     // ── build_demo_stack ──────────────────────────────────────
 
     #[test]
@@ -431,8 +553,6 @@ mod tests {
     }
 
     // ── TmuxPassthroughGuard ──────────────────────────────────
-
-    /// Helper: ensure the TMUXPASSTHROUGH env var is absent before
 
     /// Consolidated test for TmuxPassthroughGuard env var management.
     /// All env var tests are in a single function to avoid parallel

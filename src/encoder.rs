@@ -3284,6 +3284,7 @@ mod tests {
     /// BOTH a transmit command (`a=T`) and a place command
     /// (`a=p,i=1,z=-1`).
     #[test]
+    #[cfg(feature = "kitty-encoder")]
     fn encode_to_writer_emits_place_command_after_transmission() {
         let mut fb = FrameBuffer::new(2, 2);
         fb.pixels_mut()[0] = [255, 0, 0, 255];
@@ -3300,6 +3301,7 @@ mod tests {
     /// v0.12.2: a fully-transparent framebuffer must
     /// short-circuit to a single delete command (`a=d`).
     #[test]
+    #[cfg(feature = "kitty-encoder")]
     fn encode_to_writer_fully_transparent_framebuffer_emits_delete_only() {
         let fb = FrameBuffer::new(100, 100);
         assert!(fb.is_fully_transparent());

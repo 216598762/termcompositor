@@ -8,6 +8,8 @@ This guide covers how to use `termcompositor` as a library and as a CLI tool.
 
 - [Installation](#installation)
 - [Library usage](#library-usage)
+- [Animation loop](#animation-loop)
+- [Layer transforms](#layer-transforms)
 - [CLI usage](#cli-usage)
 - [Feature flags](#feature-flags)
 - [Protocol auto-detection](#protocol-auto-detection)
@@ -219,6 +221,185 @@ use termcompositor::encoder::sixel;
 let fb = FrameBuffer::new(1920, 1080);
 let mut writer = BufWriter::new(std::io::stdout().lock());
 sixel::encode_to_writer_streaming(&fb, &mut writer).unwrap();
+```
+
+---
+
+## Animation loop
+
+The `animation` module provides a built-in frame loop with delta-time
+tracking, terminal resize handling, and protocol encoding. This is
+the easiest way to build animated terminal dashboards.
+
+### Quick start
+
+```rust,no_run
+use termcompositor::animation::{self, AnimContext};
+use termcompositor::{LayerStack, RectLayer, SolidColor};
+
+fn main() {
+    let mut stack = LayerStack::new();
+    let bg = stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
+    let bar = stack.push(
+        RectLayer::new(2, 10, 20, 5, [0, 200, 0, 255]).with_z(10)
+    );
+
+    animation::run_with_stack(stack, 30.0, move |ctx| {
+        let t = ctx.elapsed().as_secs_f32();
+        // Animate the bar opacity using a sine wave.
+        let opacity = (t * 2.0).sin() * 0.5 + 0.5;
+        if let Some(entry) = ctx.layers_mut().get_mut(bar) {
+            entry.set_opacity(opacity);
+        }
+        ctx.request_redraw();
+    });
+}
+```
+
+### Entry points
+
+| Function | Description |
+|---|---|
+| `animation::run(fps, callback)` | Start with an empty layer stack. |
+| `animation::run_with_stack(stack, fps, callback)` | Start with initial layers. |
+| `animation::run_with_config(stack, config, callback)` | Full control over protocol, FPS, and clear-between-frames. |
+
+### AnimContext
+
+The callback receives a `&mut AnimContext` each frame with:
+
+| Method | Description |
+|---|---|
+| `layers()` / `layers_mut()` | Access the layer stack. |
+| `delta_time()` | Time since the last frame (frame-rate-independent animation). |
+| `elapsed()` | Total time since the loop started. |
+| `frame_count()` | Current frame number (0-indexed). |
+| `terminal_size()` | Current terminal dimensions (auto-detected each frame). |
+| `request_redraw()` | Opt-in rendering — skip encoding without this call. |
+| `exit()` | Graceful shutdown after the current frame. |
+
+### AnimConfig
+
+```rust
+use termcompositor::animation::AnimConfig;
+use termcompositor::Protocol;
+
+let config = AnimConfig::new(60.0)           // target FPS
+    .with_protocol(Protocol::Kitty)           // force a protocol
+    .with_clear_between_frames(false);        // skip ANSI clear
+```
+
+### CLI flags
+
+```bash
+termcompositor --animate              # default 30 FPS
+termcompositor --animate --fps 60     # 60 FPS
+termcompositor --animate --fps 10     # slow-motion
+```
+
+### How it works
+
+1. Protocol is resolved once at startup (Auto detection is cached).
+2. Each frame: callback runs → if `request_redraw()` was called, render
+   and encode → sleep for remaining frame time.
+3. Terminal size is re-detected each frame; the framebuffer is resized
+   automatically.
+4. The loop exits when `ctx.exit()` is called.
+
+---
+
+## Layer transforms
+
+Per-layer rotation and scaling via an affine 2D `Transform`. Transforms
+are applied at render time using inverse mapping with bilinear
+interpolation, so rotated and scaled layers look smooth.
+
+### Creating a transform
+
+```rust
+use termcompositor::geometry::Transform;
+
+// Rotate 45° around the center of a 100×100 layer.
+let t = Transform::new()
+    .with_rotation(45.0)          // degrees, clockwise
+    .with_scale(1.5, 1.5)         // horizontal, vertical
+    .with_anchor(50.0, 50.0);     // rotation/scale center
+```
+
+| Builder method | Description |
+|---|---|
+| `Transform::new()` | Identity transform (no rotation, scale = 1.0, anchor at origin). |
+| `.with_rotation(degrees)` | Clockwise rotation in degrees. |
+| `.with_scale(sx, sy)` | Horizontal and vertical scale factors. |
+| `.with_anchor(x, y)` | Anchor point in layer-local coordinates. |
+
+### Applying a transform to a layer
+
+```rust
+use termcompositor::{LayerEntry, RectLayer, Transform};
+
+let rect = RectLayer::new(10, 10, 50, 50, [255, 0, 0, 255]);
+let entry = LayerEntry::new(0, Box::new(rect))
+    .with_transform(
+        Transform::new()
+            .with_rotation(30.0)
+            .with_scale(2.0, 2.0)
+            .with_anchor(25.0, 25.0)
+    );
+```
+
+Or set it after pushing:
+
+```rust
+let id = stack.push(rect);
+stack.get_mut(id).unwrap().set_transform(Some(
+    Transform::new().with_rotation(90.0)
+));
+```
+
+### Accessor methods
+
+| Method | Description |
+|---|---|
+| `entry.transform()` | `Option<&Transform>` — reference to the current transform. |
+| `entry.transform_mut()` | `Option<&mut Transform>` — mutable reference. |
+| `entry.set_transform(Some(t))` | Set or clear the transform. |
+
+### How transforms are rendered
+
+The compositor uses **inverse mapping**: for each pixel in the target
+framebuffer, it computes the corresponding source coordinate via the
+inverse transform, then samples the source with bilinear interpolation.
+
+This means:
+- Rotated layers look smooth (no aliasing artifacts at edges).
+- Scaled layers use bilinear filtering (no nearest-neighbour blockiness).
+- The bounding box is computed from the transformed corners, so only
+  the affected region is iterated.
+
+### Identity optimization
+
+If the transform is the identity (no rotation, scale = 1.0), the
+compositor skips the transform path entirely and renders the layer
+directly — zero overhead.
+
+### Forward and inverse mapping
+
+For advanced use cases, the `Transform` struct exposes both mapping
+directions:
+
+```rust
+use termcompositor::geometry::Transform;
+
+let t = Transform::new().with_rotation(90.0).with_anchor(5.0, 5.0);
+
+// Forward: layer-local → target space.
+let (tx, ty) = t.apply(10.0, 0.0);
+
+// Inverse: target → layer-local (used internally by the compositor).
+let (lx, ly) = t.apply_inverse(tx, ty);
+assert!((lx - 10.0).abs() < 1e-5);
+assert!((ly - 0.0).abs() < 1e-5);
 ```
 
 ---

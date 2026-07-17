@@ -79,7 +79,126 @@ impl Compositor for CpuCompositor {
             .iter_sorted()
             .filter(|e| e.is_visible() && e.opacity() > 0.0)
         {
-            entry.layer().render(target, (0, 0), entry.opacity());
+            match entry.transform() {
+                Some(transform) if !transform.is_identity() => {
+                    // Compute the source bounding box from the layer's
+                    // bounds. If the layer reports no bounds (e.g.
+                    // SolidColor), fall back to the full target size.
+                    let (src_w, src_h) = match entry.layer().bounds() {
+                        Some(b) => (b.width, b.height),
+                        None => (target.width(), target.height()),
+                    };
+                    // Render only the source region into a small temp buffer.
+                    // Use opacity=1.0 here because apply_transform_to_target
+                    // applies the entry's opacity during the final blend.
+                    let mut tmp = FrameBuffer::new(src_w, src_h);
+                    entry.layer().render(&mut tmp, (0, 0), 1.0);
+                    // Compute the target-space bounding box by transforming
+                    // the four corners of the source region and taking the
+                    // axis-aligned bounding box of the result.
+                    let corners = [
+                        transform.apply(0.0, 0.0),
+                        transform.apply(src_w as f32, 0.0),
+                        transform.apply(0.0, src_h as f32),
+                        transform.apply(src_w as f32, src_h as f32),
+                    ];
+                    let mut min_x = f32::INFINITY;
+                    let mut min_y = f32::INFINITY;
+                    let mut max_x = f32::NEG_INFINITY;
+                    let mut max_y = f32::NEG_INFINITY;
+                    for (cx, cy) in corners {
+                        min_x = min_x.min(cx);
+                        min_y = min_y.min(cy);
+                        max_x = max_x.max(cx);
+                        max_y = max_y.max(cy);
+                    }
+                    // Clamp to target bounds.
+                    let tx_min = (min_x.floor() as i32).max(0) as u32;
+                    let ty_min = (min_y.floor() as i32).max(0) as u32;
+                    let tx_max = (max_x.ceil() as i32 + 1).min(target.width() as i32) as u32;
+                    let ty_max = (max_y.ceil() as i32 + 1).min(target.height() as i32) as u32;
+                    if tx_min < tx_max && ty_min < ty_max {
+                        apply_transform_to_target(
+                            target,
+                            &tmp,
+                            transform,
+                            entry.opacity(),
+                            tx_min,
+                            ty_min,
+                            tx_max,
+                            ty_max,
+                        );
+                    }
+                }
+                _ => {
+                    entry.layer().render(target, (0, 0), entry.opacity());
+                }
+            }
+        }
+    }
+}
+
+/// Applies a transform to a source framebuffer and composites the
+/// result onto the target within the given bounding box
+/// `[tx_min, ty_min) .. (tx_max, ty_max)`. Uses inverse mapping:
+/// for each target pixel, computes the corresponding source
+/// coordinate via the inverse transform, samples with bilinear
+/// interpolation, and blends onto the target.
+fn apply_transform_to_target(
+    target: &mut FrameBuffer,
+    source: &FrameBuffer,
+    transform: &crate::geometry::Transform,
+    opacity: f32,
+    tx_min: u32,
+    ty_min: u32,
+    tx_max: u32,
+    ty_max: u32,
+) {
+    let sw = source.width() as f32;
+    let sh = source.height() as f32;
+
+    for ty in ty_min..ty_max {
+        for tx in tx_min..tx_max {
+            // Inverse-map target pixel to source space.
+            let (sx, sy) = transform.apply_inverse(tx as f32, ty as f32);
+
+            // Bilinear interpolation in source space.
+            if sx < 0.0 || sy < 0.0 || sx >= sw || sy >= sh {
+                continue;
+            }
+            let x0 = sx.floor() as u32;
+            let y0 = sy.floor() as u32;
+            let x1 = (x0 + 1).min(sw as u32 - 1);
+            let y1 = (y0 + 1).min(sh as u32 - 1);
+            let fx = sx - x0 as f32;
+            let fy = sy - y0 as f32;
+
+            let p00 = source.get_pixel(x0, y0).copied().unwrap_or([0, 0, 0, 0]);
+            let p10 = source.get_pixel(x1, y0).copied().unwrap_or([0, 0, 0, 0]);
+            let p01 = source.get_pixel(x0, y1).copied().unwrap_or([0, 0, 0, 0]);
+            let p11 = source.get_pixel(x1, y1).copied().unwrap_or([0, 0, 0, 0]);
+
+            // Interpolate RGB channels separately from alpha to
+            // avoid incorrect blending with premultiplied values.
+            let mut color = [0u8; 4];
+            for c in 0..3 {
+                let v = p00[c] as f32 * (1.0 - fx) * (1.0 - fy)
+                    + p10[c] as f32 * fx * (1.0 - fy)
+                    + p01[c] as f32 * (1.0 - fx) * fy
+                    + p11[c] as f32 * fx * fy;
+                color[c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+            // Alpha: interpolate as straight alpha (not premultiplied).
+            let a = p00[3] as f32 * (1.0 - fx) * (1.0 - fy)
+                + p10[3] as f32 * fx * (1.0 - fy)
+                + p01[3] as f32 * (1.0 - fx) * fy
+                + p11[3] as f32 * fx * fy;
+            color[3] = a.round().clamp(0.0, 255.0) as u8;
+
+            let src_alpha = f32::from(color[3]) / 255.0 * opacity;
+            if let Some(px) = target.get_pixel_mut(tx, ty) {
+                crate::framebuffer::blend_over(px, &color, src_alpha);
+            }
         }
     }
 }
@@ -511,5 +630,124 @@ mod tests {
     fn entries_mut_empty_stack() {
         let mut s = LayerStack::new();
         assert!(s.entries_mut().is_empty());
+    }
+
+    // ── Transform rendering tests ─────────────────────────────
+
+    use crate::geometry::Transform;
+    use crate::layer::RectLayer;
+
+    #[test]
+    fn transform_90deg_rotation_moves_rect() {
+        // A 2x3 red rect at (0, 0) rotated 90° around its center (1.0, 1.5).
+        // After CW rotation, the rect should appear in a different region.
+        let mut s_no_t = LayerStack::new();
+        let _ = s_no_t.push(RectLayer::new(0, 0, 2, 3, [255, 0, 0, 255]));
+        let mut fb_no_t = FrameBuffer::new(10, 10);
+        s_no_t.render(&mut fb_no_t);
+
+        let mut s = LayerStack::new();
+        let id = s.push(RectLayer::new(0, 0, 2, 3, [255, 0, 0, 255]));
+        let t = Transform::new().with_rotation(90.0).with_anchor(1.0, 1.5);
+        s.get_mut(id).unwrap().set_transform(Some(t));
+        let mut fb = FrameBuffer::new(10, 10);
+        s.render(&mut fb);
+
+        // The rotated rect should render differently from the unrotated one.
+        assert_ne!(fb_no_t.pixels(), fb.pixels(),
+            "rotated rect should render differently from unrotated");
+        // And it should have some non-zero pixels.
+        let has_content = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_content, "rotated rect should produce visible pixels");
+    }
+
+    #[test]
+    fn transform_2x_scale_doubles_rect_size() {
+        // A 3x2 red rect at (0, 0) scaled 2x around its center
+        // (1.5, 1.0). The resulting rect should be ~6x4 pixels.
+        let mut s_no_t = LayerStack::new();
+        let _ = s_no_t.push(RectLayer::new(0, 0, 3, 2, [255, 0, 0, 255]));
+        let mut fb_no_t = FrameBuffer::new(10, 10);
+        s_no_t.render(&mut fb_no_t);
+
+        let mut s = LayerStack::new();
+        let id = s.push(RectLayer::new(0, 0, 3, 2, [255, 0, 0, 255]));
+        let t = Transform::new()
+            .with_scale(2.0, 2.0)
+            .with_anchor(1.5, 1.0);
+        s.get_mut(id).unwrap().set_transform(Some(t));
+        let mut fb = FrameBuffer::new(10, 10);
+        s.render(&mut fb);
+
+        // The scaled rect should be larger than the original.
+        let scaled_count = fb.pixels().iter().filter(|p| p[0] > 200 && p[3] > 200).count();
+        let original_count = fb_no_t.pixels().iter().filter(|p| p[0] > 200 && p[3] > 200).count();
+        assert!(scaled_count > original_count,
+            "scaled rect should have more red pixels than original, scaled={scaled_count} original={original_count}");
+    }
+
+    #[test]
+    fn transform_identity_render_matches_no_transform() {
+        // A RectLayer with an identity transform should render
+        // identically to one without a transform.
+        let mut s1 = LayerStack::new();
+        let _id1 = s1.push(RectLayer::new(2, 2, 4, 3, [0, 0, 255, 255]));
+        let mut fb1 = FrameBuffer::new(10, 10);
+        s1.render(&mut fb1);
+
+        let mut s2 = LayerStack::new();
+        let id2 = s2.push(RectLayer::new(2, 2, 4, 3, [0, 0, 255, 255]));
+        s2.get_mut(id2).unwrap().set_transform(Some(Transform::new()));
+        let mut fb2 = FrameBuffer::new(10, 10);
+        s2.render(&mut fb2);
+
+        assert_eq!(fb1.pixels(), fb2.pixels());
+    }
+
+    #[test]
+    fn transform_opacity_not_double_applied() {
+        // A red RectLayer at 0.5 opacity. After transform rendering,
+        // the pixel alpha should reflect 0.5, not 0.25 (double-applied)
+        // and not 1.0 (not applied at all).
+        let mut s = LayerStack::new();
+        let id = s.push(RectLayer::new(0, 0, 3, 3, [255, 0, 0, 255]));
+        s.get_mut(id).unwrap().set_opacity(0.5);
+        let t = Transform::new().with_scale(2.0, 2.0).with_anchor(1.5, 1.5);
+        s.get_mut(id).unwrap().set_transform(Some(t));
+        let mut fb = FrameBuffer::new(10, 10);
+        s.render(&mut fb);
+
+        // Find the strongest red pixel (center of scaled rect).
+        let max_alpha = fb.pixels()
+            .iter()
+            .filter(|p| p[0] > 100)
+            .map(|p| p[3])
+            .max()
+            .unwrap_or(0);
+        // Opacity 0.5 → max alpha ≈ 128.
+        // If double-applied: ≈ 64 (too low).
+        // If not applied at all: 255 (too high).
+        assert!(max_alpha > 80 && max_alpha < 200,
+            "opacity should be ~128, got alpha={max_alpha}");
+    }
+
+    #[test]
+    fn transform_rendered_rect_not_at_original_position() {
+        // A red RectLayer at (0,0) rotated 45° around (0,0) should
+        // NOT have all its red pixels at (0,0)-(3,3).
+        let mut s_no_t = LayerStack::new();
+        let _id_no_t = s_no_t.push(RectLayer::new(0, 0, 4, 4, [255, 0, 0, 255]));
+        let mut fb_no_t = FrameBuffer::new(10, 10);
+        s_no_t.render(&mut fb_no_t);
+
+        let mut s_t = LayerStack::new();
+        let id_t = s_t.push(RectLayer::new(0, 0, 4, 4, [255, 0, 0, 255]));
+        let t = Transform::new().with_rotation(45.0);
+        s_t.get_mut(id_t).unwrap().set_transform(Some(t));
+        let mut fb_t = FrameBuffer::new(10, 10);
+        s_t.render(&mut fb_t);
+
+        assert_ne!(fb_no_t.pixels(), fb_t.pixels(),
+            "rotated rect should render differently from unrotated");
     }
 }
