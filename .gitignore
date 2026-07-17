@@ -51,3 +51,4 @@ target/
 # passphrase location, keygrip, and the v0.x release-tagging
 # workflow in the shared repo.
 AGENTS.md
+ROADMAP.md
