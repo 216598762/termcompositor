@@ -120,13 +120,13 @@ The [`FrameBuffer`] is a 2D RGBA pixel array — the compositor's output target:
 
 ```rust
 let mut fb = FrameBuffer::new(80, 24);
-fb.clear([0, 0, 0, 255]);          // Fill with a colour
+fb.clear();                        // Reset all pixels to transparent black
 fb.pixels()                        // &[[u8; 4]] — all pixels
 fb.pixels_mut()                    // &mut [[u8; 4]] — mutable
 fb.get_pixel(x, y)                 // Option<&[u8; 4]> — bounds-checked read
 fb.get_pixel_mut(x, y)             // Option<&mut [u8; 4]> — bounds-checked write
 fb.width() / fb.height()           // Dimensions in pixels
-blend_over(src, dst)               // Straight-alpha over-compositing
+blend_over(dst, src, src_alpha)    // Straight-alpha over-compositing
 ```
 
 ### Encoder
@@ -149,13 +149,143 @@ dispatch_to_writer(Protocol::Auto, &fb, &mut out)?;
 let bytes = Protocol::Kitty.encode(&fb)?;
 ```
 
-Streaming entry points (feature-gated):
+### Streaming encode memory model
 
-| Function | Feature | Memory |
+The streaming entry points are the default encode path. Even the `Vec<u8>`-returning
+`encode` functions internally delegate to them. This section explains the memory
+behaviour of each path, from best (O(1) regardless of framebuffer size) to worst
+(O(N) in both input and output).
+
+#### Overview
+
+| Function | Feature | Peak working set | Dominant allocation |
+|---|---|---|---|
+| `encoder::kitty::encode_to_writer` | `kitty-encoder` | O(1) per chunk (~4KB scratch) | Per-chunk pixel slice of ≤ 3072 bytes |
+| `encoder::sixel::encode_to_writer_streaming` | `sixel-encoder` | O(1) total (~32KB one-time) | 32KB LUT (built once, shared) |
+| `encoder::sixel::encode_to_writer` | `sixel-encoder` | O(N) input + O(1) output | Full RGBA `Vec<u8>` (e.g. 8MB for 1920×1080) |
+| `encoder::kitty::encode` / `sixel::encode` | respective feature | O(N) in output | Full output `Vec<u8>` |
+| `dispatch(Protocol, frame)` | respective feature | O(N) in output + optional wrap | Output + optional tmux wrap `Vec` |
+
+#### Kitty streaming path (`encode_to_writer`)
+
+**O(1) per chunk.** The Kitty graphics protocol limits each APC command to
+4096 bytes of base64-encoded data. `dashcompositor` encodes 768 RGBA pixels
+(3072 raw bytes) per chunk — the exact amount that produces 4096 base64 chars
+with no padding, satisfying the spec's alignment requirement.
+
+Per chunk:
+1. A slice of up to 768 pixels is taken from the `FrameBuffer`'s internal
+   `Vec<[[u8; 4]]` — **no copy of the pixel data** at this stage.
+2. The pixel slice is flattened into a `Vec<u8>` of RGBA bytes (≤ 3072 bytes).
+   This is the **only per-chunk allocation**, and it's bounded regardless of
+   framebuffer size.
+3. The `little-kitty` crate's `KittyCommandWriter` base64-encodes the chunk
+   into a temporary APC buffer (~4KB).
+4. The APC buffer is written to the `&mut impl Write` sink and dropped.
+
+For a 1920×1080 framebuffer (2,073,600 pixels), the encode produces ~2,701
+chunks. Each chunk allocates and frees ~7KB total (3072 RGBA + ~4KB APC
+framing), so peak working set never exceeds ~11KB regardless of the
+framebuffer being 8MB+ in memory.
+
+**Input memory**: The `FrameBuffer`'s pixel `Vec<[[u8; 4]]` is always in
+memory — it was allocated during compositing. The streaming encoder does not
+make its own copy or allocate any additional O(N) structure.
+
+```rust
+use dashcompositor::encoder::kitty;
+
+let fb = FrameBuffer::new(1920, 1080);
+let mut out = Vec::new();               // grows with output size
+kitty::encode_to_writer(&fb, &mut out)?; // O(1) scratch per chunk
+```
+
+#### Sixel adaptive path (`encode_to_writer`)
+
+**O(N) input + O(1) output.** Uses the `icy_sixel` crate's adaptive colour
+quantizer for high image quality. `icy_sixel` 0.5 takes owned RGBA bytes via
+`SixelImage::from_rgba(Vec<u8>, w, h)` and has no streaming input API, so the
+full RGBA byte buffer must be materialised first (8MB+ for a 2MP frame).
+
+Once the RGBA bytes are collected, `icy_sixel`'s `encode()` produces a single
+`String` of Sixel DCS bytes. The streaming win over the v0.6.0 path is that
+this `String`'s internal buffer is **borrowed** via `as_bytes()` and written
+directly to the `&mut impl Write` sink, rather than being **copied** into a
+new `Vec<u8>` via `into_bytes()`.
+
+```rust
+use dashcompositor::encoder::sixel;
+
+let fb = FrameBuffer::new(1920, 1080);
+let mut out = Vec::new();
+sixel::encode_to_writer(&fb, &mut out)?; // 8MB+ RGBA alloc, then O(1) write
+```
+
+#### Sixel streaming path (`encode_to_writer_streaming`)
+
+**Fully O(1) memory.** Written for the use case where even the single full-frame
+RGBA allocation of the adaptive path is too expensive (e.g. multi-megapixel
+dashboards on memory-constrained hardware). Uses a fixed xterm-256 palette
+(16 basic + 6×6×6 cube + 24 grayscale) instead of adaptive quantization.
+
+Allocations (one-time, shared across calls):
+- A 5-bit RGB → palette index LUT: 32×32×32 = 32,768 entries × 1 byte =
+  **32KB**, built lazily on first call via `OnceLock`. Computation: ~8M
+  operations (~100ms). After init, per-pixel quantization is a single table
+  lookup.
+
+The palette itself (256 × 3 bytes = 768 bytes) is generated at **compile time**
+via a `const fn` — zero runtime cost.
+
+Per band (6 rows):
+- No per-band heap allocations. Pixels are read directly from the `FrameBuffer`
+  via `frame.pixels()` — a reference borrow with zero copy.
+- A fixed-size `[u8; 6]` stack array tracks the six pixels in the current
+  column.
+- Output bytes are written directly to the `&mut impl Write` sink via
+  `write!()` and `write_all()`, with no intermediate buffer.
+
+```rust
+use dashcompositor::encoder::sixel;
+
+let fb = FrameBuffer::new(1920, 1080);
+let mut out = Vec::new();
+sixel::encode_to_writer_streaming(&fb, &mut out)?; // zero full-frame allocs
+```
+
+#### dispatch_to_writer — end-to-end streaming
+
+`dispatch_to_writer` combines all three paths into a single `Protocol`-based
+dispatch that writes to a `&mut impl Write` sink. It is the recommended entry
+point for most users:
+
+```rust
+use dashcompositor::{dispatch_to_writer, detect, FrameBuffer};
+
+let fb = FrameBuffer::new(1920, 1080);
+let mut out = Vec::new();
+dispatch_to_writer(Protocol::Auto, &fb, &mut out)?;
+```
+
+Memory behaviour depends on the resolved protocol:
+- `Protocol::Kitty` → delegates to `kitty::encode_passthrough_to_writer`,
+  which calls `encode_to_writer` (O(1) per chunk) and, if the tmux passthrough
+  opt-in is set, wraps the output through a `PassthroughWriter` adapter
+  (also O(1) — no intermediate `Vec`).
+- `Protocol::Sixel` → delegates to `sixel::encode_to_writer` (the
+  `icy_sixel`-based path: O(N) input).
+- `Protocol::Auto` → recurses via
+  `dispatch_to_writer(detect(), frame, out)`. The recursion is bounded
+  because `detect()` returns only `Kitty` or `Sixel` (never `Auto`).
+
+#### When to use which
+
+| Use case | Recommended path | Rationale |
 |---|---|---|
-| `encoder::kitty::encode_to_writer` | `kitty-encoder` | O(1) per chunk (~4KB) |
-| `encoder::sixel::encode_to_writer` | `sixel-encoder` | O(N) input + O(1) output |
-| `encoder::sixel::encode_to_writer_streaming` | `sixel-encoder` | O(1) total |
+| Terminal-sized framebuffer (≤ 80×24) | `Protocol::Auto` via `dispatch_to_writer` or `ProtocolEncoder::encode` | The framebuffer is tiny (≤ 7680 pixels); even the O(N) paths are trivial. |
+| Multi-megapixel framebuffer, want maximum image quality | `encoder::sixel::encode_to_writer` or `Protocol::Sixel` | Adaptive quantization gives best quality for photos. Accept the O(N) input allocation. |
+| Multi-megapixel framebuffer, memory-constrained | `encoder::kitty::encode_to_writer` (Kitty terminals) or `encoder::sixel::encode_to_writer_streaming` (Sixel terminals) | Both paths are O(1) regardless of framebuffer size. The Sixel streaming path uses a fixed palette — slightly lower quality for photos, identical for UI. |
+| Any framebuffer size, don't want to think about it | `dispatch_to_writer(Protocol::Auto, &fb, &mut out)` | Uses `detect()` to pick the best protocol, then the best available path. |
 
 ### Protocol auto-detection
 
@@ -189,6 +319,110 @@ let tmux_safe = wrap_for_tmux(kitty_bytes);
 | `image-decoder` | off | `image` | `ImageLayer` (PNG + JPEG) |
 
 Enable at least one encoder feature (`kitty-encoder` or `sixel-encoder`) to produce terminal output. Without either, `dispatch_to_writer` returns `UnsupportedProtocol`.
+
+---
+
+## Error handling
+
+The library uses a mix of `Result<T, EncoderError>` for fallible operations
+and `Option<T>` for optional access patterns. Every public API entry point
+that can fail documents what it returns and why.
+
+### EncoderError
+
+The single error type [`EncoderError`] covers all encode-path failures:
+
+```rust
+pub enum EncoderError {
+    /// The requested protocol was not compiled into this build.
+    /// E.g. calling `Protocol::Kitty.encode()` without the
+    /// `kitty-encoder` Cargo feature.
+    UnsupportedProtocol(&'static str),
+
+    /// The framebuffer has zero width or height.
+    InvalidDimensions { width: u32, height: u32 },
+
+    /// The underlying encoder crate (`little-kitty` or
+    /// `icy_sixel`) returned an error. Display output is
+    /// forwarded verbatim.
+    Encode(String),
+}
+```
+
+| Variant | Display format | Trigger |
+|---|---|---|
+| `UnsupportedProtocol` | `"protocol {p} is not supported in this build"` | Calling `Kitty` or `Sixel` encode without the corresponding feature enabled |
+| `InvalidDimensions` | `"framebuffer has invalid dimensions: {width}x{height}"` | Passing a zero-width or zero-height `FrameBuffer` to an encoder |
+| `Encode` | `"encoder failed: {msg}"` | Underlying crate failure (e.g. `icy_sixel` colour quantisation failure) |
+
+`EncoderError` implements `std::error::Error` and is the only error type
+in the public API.
+
+**Conversion impls** (feature-gated):
+
+| `From` impl | Feature gate | Purpose |
+|---|---|---|
+| `From<std::io::Error>` | `kitty-encoder` or `sixel-encoder` | `?` on `Write` calls inside streaming encoders |
+| `From<icy_sixel::SixelError>` | `sixel-encoder` | `?` on `icy_sixel` calls |
+
+### Option-based fallible APIs
+
+Several public APIs return `Option` instead of `Result` because the failure
+is a lookup miss, not an invariant violation:
+
+| API | Returns | Meaning of `None` |
+|---|---|---|
+| `LayerStack::get(id)` / `get_mut(id)` | `Option<&LayerEntry>` / `Option<&mut LayerEntry>` | The `LayerId` was removed or never existed |
+| `LayerStack::remove(id)` | `Option<LayerEntry>` | The `LayerId` was not found |
+| `LayerStack::index_of(id)` | `Option<usize>` | The `LayerId` is not in the stack |
+| `FrameBuffer::get_pixel(x, y)` | `Option<&[u8; 4]>` | `(x, y)` is outside the framebuffer bounds |
+| `FrameBuffer::get_pixel_mut(x, y)` | `Option<&mut [u8; 4]>` | `(x, y)` is outside the framebuffer bounds |
+| `TerminalSize::detect()` | `Option<TerminalSize>` | Terminal size could not be determined (non-TTY stdout, unsupported platform) |
+
+### Defaults and fallbacks
+
+Where a failure would block the caller's pipeline, defaults are chosen
+instead of propagating an error:
+
+| API | Fallback | Justification |
+|---|---|---|
+| `TerminalSize::current()` | 80×24 (VT100 default) | Every compositor needs a size; 80×24 is universally understood |
+| `FrameBuffer::new(w, h)` | Saturating multiplication on dimensions | Absurdly large inputs produce an empty buffer rather than overflow (zero-width/height buffers still produce an error at encode time) |
+
+### CLI error handling
+
+The CLI binary never panics. All error paths produce a descriptive message
+on stderr and exit with code 0 (non-zero exit codes are reserved for
+shell-level issues like broken pipes):
+
+```
+$ dashcompositor  # default build, no encoder features
+...
+encoder error for protocol sixel: protocol sixel is not supported in this build \
+(is the required Cargo feature enabled?)
+```
+
+Invalid CLI flags are also handled without panicking:
+
+```
+$ dashcompositor --protocol unknown
+warning: unknown --protocol value `unknown`; falling back to `auto`
+```
+
+### Non-panicking guarantees
+
+No public API function panics under normal use. Specifically:
+
+- **`FrameBuffer::new`** uses saturating arithmetic on dimensions, so no
+  overflow panic for absurdly large inputs.
+- **`encode` / `dispatch_to_writer`** never panics — all failure modes
+  return `EncoderError`.
+- **`LayerStack::push`** never panics — the internal `Vec` grows as needed.
+- **`CpuCompositor::compose`** never panics — out-of-bounds pixel access is
+  silently ignored (layers are clipped to framebuffer bounds).
+- **`TerminalSize::current`** never panics — `detect()` returning `None`
+  falls through to the 80×24 default.
+- **`wrap_for_tmux`** never panics — writing to a `Vec<u8>` is infallible.
 
 ---
 
