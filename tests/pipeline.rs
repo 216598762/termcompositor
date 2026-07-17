@@ -11,8 +11,9 @@
 //! - `encode_passthrough_to_writer()`
 
 use termcompositor::{
-    dispatch_to_writer, detect, BorderLayer, CanvasLayer, GradientLayer, DropShadow, FrameBuffer, LayerStack, Protocol, ProtocolEncoder, RectLayer,
-    SolidColor, TextLayer,
+    dispatch_to_writer, detect, BorderLayer, CanvasLayer, DropShadow,
+    FrameBuffer, GradientLayer, LayerStack, Protocol, ProtocolEncoder,
+    RectLayer, SolidColor, TextLayer,
 };
 
 #[allow(unused_imports)]
