@@ -1398,3 +1398,125 @@ mod image_layer_tests {
         assert_eq!(layer.name(), "test-img");
     }
 }
+
+// ── Additional font-rasterizer coverage tests ───────────────
+// Targeted at the 21 uncovered lines in render_with_font,
+// ensure_font (FontSource::Path), and boundary conditions.
+
+#[cfg(all(test, feature = "font-rasterizer"))]
+mod font_rasterizer_extra {
+    use super::{FontSource, Layer, TextLayer};
+    use crate::framebuffer::FrameBuffer;
+
+    #[test]
+    fn font_source_path_loads_from_file() {
+        // Copy the bundled font to a temp file so ensure_font
+        // exercises the FontSource::Path branch.
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = dir.path().join("test_font.ttf");
+        std::fs::write(&path, crate::layer::BUNDLED_FONT_DATA)
+            .expect("failed to write temp font file");
+
+        let t = TextLayer::new(0, 0, "AB", [255; 4])
+            .with_font(FontSource::Path(path), 14.0);
+        // text_width triggers ensure_font, which reads from disk.
+        let w = t.text_width();
+        assert!(w > 0, "FontSource::Path must produce positive width, got {w}");
+    }
+
+    #[test]
+    fn render_with_font_handles_spaces() {
+        // 'A B' contains a space; exercise the space-advance path.
+        let t = TextLayer::new(0, 0, "A B", [200, 100, 50, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(40, 20);
+        t.render(&mut fb, (0, 0), 1.0);
+        // The 'A' and 'B' should produce non-transparent pixels;
+        // the space between them should remain transparent.
+        let has_pixels = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_pixels, "render with spaces should produce glyph pixels");
+    }
+
+    #[test]
+    fn render_with_font_clips_outside_framebuffer() {
+        // Position the text far to the right so most glyphs fall
+        // outside the framebuffer; get_pixel_mut returns None
+        // and the glyph is silently clipped.
+        let t = TextLayer::new(50, 50, "X", [255, 255, 255, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(10, 10);
+        t.render(&mut fb, (0, 0), 1.0);
+        // All pixels should remain transparent (clipped).
+        let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(!any_nonzero, "text fully outside framebuffer should produce no pixels");
+    }
+
+    #[test]
+    fn render_with_font_zero_opacity_is_noop() {
+        let t = TextLayer::new(0, 0, "A", [200, 100, 50, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(20, 20);
+        t.render(&mut fb, (0, 0), 0.0);
+        // effective = 0.0, so the framebuffer must stay untouched.
+        let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(!any_nonzero, "render with 0 opacity should not change framebuffer");
+    }
+
+    #[test]
+    fn render_with_font_negative_offset_clips_glyph() {
+        // Use a tiny 1x1 framebuffer and position text at (0,0).
+        // The glyph will extend beyond the single pixel, so
+        // get_pixel_mut returns None for out-of-bounds pixels,
+        // exercising the clipping path inside render_with_font.
+        // We also pass an offset that pushes the cursor negative.
+        let t = TextLayer::new(0, 0, "A", [200, 100, 50, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(1, 1);
+        // offset = u32::MAX wraps when added to x=0 via saturating_add,
+        // then ox as i32 = -1, making glyph_x negative for most pixels.
+        t.render(&mut fb, (u32::MAX, u32::MAX), 1.0);
+        // The single pixel may or may not be hit depending on
+        // glyph metrics; what matters is the code path runs without panic.
+    }
+
+    #[test]
+    fn render_with_font_partial_clip_left_edge() {
+        // Position text so the glyph is partially outside the left
+        // edge of the framebuffer, exercising the px < 0 path
+        // for some glyph pixels while others render normally.
+        let t = TextLayer::new(0, 0, "A", [200, 100, 50, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(3, 20);
+        t.render(&mut fb, (0, 0), 1.0);
+        // Some pixels should render (the rightmost glyph pixels
+        // that fall within bounds).
+        let has_pixels = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_pixels, "partial clip should still render some glyph pixels");
+    }
+
+    #[test]
+    fn render_with_font_multi_line_with_newlines_and_spaces() {
+        // Exercise newline reset + space advance in a single render.
+        let t = TextLayer::new(0, 0, "A B\nCD", [200, 100, 50, 255])
+            .with_font_size(14.0);
+        let mut fb = FrameBuffer::new(40, 40);
+        t.render(&mut fb, (0, 0), 1.0);
+        let has_pixels = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(has_pixels, "multi-line render with spaces should produce pixels");
+        // Verify two distinct rows of glyph pixels exist.
+        let h = fb.height() as usize;
+        let w = fb.width() as usize;
+        let row1 = fb.pixels()[..(w * 20)].iter().any(|p| p[3] > 0);
+        let row2 = fb.pixels()[(w * 20)..].iter().any(|p| p[3] > 0);
+        assert!(row1 && row2, "both lines should produce glyph pixels");
+    }
+
+    #[test]
+    fn render_with_font_empty_text_is_noop() {
+        let t = TextLayer::new(0, 0, "", [200, 100, 50, 255]);
+        let mut fb = FrameBuffer::new(10, 10);
+        t.render(&mut fb, (0, 0), 1.0);
+        let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(!any_nonzero, "empty text render should not change framebuffer");
+    }
+}

@@ -3453,7 +3453,6 @@ mod tests {
     #[cfg(feature = "kitty-encoder")]
     #[test]
     fn kitty_passthrough_writer_empty_body() {
-        use std::io::Write;
         let mut out = Vec::new();
         let pw = super::kitty::PassthroughWriter::new(&mut out);
         let _inner = pw.finish().unwrap();
@@ -3494,7 +3493,7 @@ mod tests {
         use std::io::Write;
         let mut out = Vec::new();
         let pw = super::kitty::PassthroughWriter::new(&mut out);
-        let mut returned = pw.finish().unwrap();
+        let returned = pw.finish().unwrap();
         // Returned writer should still be usable
         returned.write_all(b"after").unwrap();
         assert!(out.starts_with(b"\x1bPtmux;"));
@@ -3568,6 +3567,23 @@ mod tests {
         assert!(!out.is_empty());
         // Should start with DCS header
         assert!(out.starts_with(b"\x1bP"));
+    }
+
+    #[cfg(feature = "sixel-encoder")]
+    #[test]
+    fn sixel_streaming_multiband_iteration() {
+        // 10 rows > 6 (one band), so the encoder iterates bands: [0..6), [6..10)
+        let fb = FrameBuffer::new(4, 10);
+        let mut out = Vec::new();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
+        assert!(!out.is_empty());
+        assert!(out.starts_with(b"\x1bP"));
+        // Sixel DCS must end with ST (ESC \)
+        assert!(out.ends_with(b"\x1b\\"));
+        // A taller frame should produce more output bytes than a 4x4 frame
+        let mut out_4x4 = Vec::new();
+        super::sixel::encode_to_writer_streaming(&FrameBuffer::new(4, 4), &mut out_4x4).unwrap();
+        assert!(out.len() > out_4x4.len());
     }
 
     // ── ProtocolEncoder trait dispatch ───────────────────────────

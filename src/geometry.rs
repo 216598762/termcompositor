@@ -124,4 +124,86 @@ mod tests {
         assert!(!a.intersects(&z));
         assert!(!z.intersects(&a));
     }
+
+    // ── proptest property-based tests ──────────────────────────
+
+    use proptest::prelude::*;
+
+    fn arb_rect() -> impl Strategy<Value = Rect> {
+        (0u32..1000, 0u32..1000, 0u32..100, 0u32..100)
+            .prop_map(|(x, y, w, h)| Rect::new(x, y, w, h))
+    }
+
+    proptest! {
+        #[test]
+        fn prop_empty_rect_never_intersects(a in arb_rect(), b in arb_rect()) {
+            let za = Rect::new(a.x, a.y, 0, a.height);
+            let zb = Rect::new(b.x, b.y, b.width, 0);
+            prop_assert!(!a.intersects(&za));
+            prop_assert!(!a.intersects(&zb));
+            prop_assert!(!za.intersects(&a));
+            prop_assert!(!zb.intersects(&a));
+        }
+
+        #[test]
+        fn prop_intersects_is_symmetric(a in arb_rect(), b in arb_rect()) {
+            prop_assert_eq!(a.intersects(&b), b.intersects(&a));
+        }
+
+        #[test]
+        fn prop_intersects_implies_overlapping_bounds(a in arb_rect(), b in arb_rect()) {
+            if a.intersects(&b) {
+                // Both must be non-empty.
+                prop_assert!(!a.is_empty());
+                prop_assert!(!b.is_empty());
+                // X-axis overlap: a.x < b.right() && b.x < a.right()
+                prop_assert!(a.x < b.right(), "a.x={} >= b.right={}", a.x, b.right());
+                prop_assert!(b.x < a.right(), "b.x={} >= a.right={}", b.x, a.right());
+                // Y-axis overlap: a.y < b.bottom() && b.y < a.bottom()
+                prop_assert!(a.y < b.bottom(), "a.y={} >= b.bottom={}", a.y, b.bottom());
+                prop_assert!(b.y < a.bottom(), "b.y={} >= a.bottom={}", b.y, a.bottom());
+            }
+        }
+
+        #[test]
+        fn prop_contains_point_inside_implies_bounds(rect in arb_rect(), px in 0u32..1000, py in 0u32..1000) {
+            if rect.contains(px, py) {
+                prop_assert!(!rect.is_empty());
+                prop_assert!(px >= rect.x, "px={} < rect.x={}", px, rect.x);
+                prop_assert!(px < rect.right(), "px={} >= rect.right={}", px, rect.right());
+                prop_assert!(py >= rect.y, "py={} < rect.y={}", py, rect.y);
+                prop_assert!(py < rect.bottom(), "py={} >= rect.bottom={}", py, rect.bottom());
+            }
+        }
+
+        #[test]
+        fn prop_contains_top_left_corner(rect in arb_rect()) {
+            if !rect.is_empty() {
+                prop_assert!(rect.contains(rect.x, rect.y));
+            }
+        }
+
+        #[test]
+        fn prop_contains_excludes_right_bottom(rect in arb_rect()) {
+            if !rect.is_empty() {
+                prop_assert!(!rect.contains(rect.right(), rect.y));
+                prop_assert!(!rect.contains(rect.x, rect.bottom()));
+                prop_assert!(!rect.contains(rect.right(), rect.bottom()));
+            }
+        }
+
+        #[test]
+        fn prop_empty_rect_contains_nothing(rect in arb_rect()) {
+            let empty = Rect::new(rect.x, rect.y, 0, 0);
+            prop_assert!(!empty.contains(rect.x, rect.y));
+            prop_assert!(!empty.contains(0, 0));
+        }
+
+        #[test]
+        fn prop_self_intersects(rect in arb_rect()) {
+            if !rect.is_empty() {
+                prop_assert!(rect.intersects(&rect), "non-empty rect must intersect itself");
+            }
+        }
+    }
 }

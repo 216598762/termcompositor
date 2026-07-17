@@ -123,7 +123,7 @@ mod kitty_pipeline {
     fn kitty_dispatch_auto_picks_kitty_in_kitty_terminal() {
         let detected = detect();
         if detected == Protocol::Kitty {
-            let mut fb = FrameBuffer::new(2, 2);
+            let fb = FrameBuffer::new(2, 2);
             let mut out = Vec::new();
             dispatch_to_writer(Protocol::Auto, &fb, &mut out).unwrap();
             assert!(
@@ -272,7 +272,7 @@ mod dispatch_pipeline {
     #[test]
     fn dispatch_to_writer_auto_picks_correct_protocol() {
         let detected = detect();
-        let mut fb = FrameBuffer::new(2, 2);
+        let fb = FrameBuffer::new(2, 2);
         let mut out = Vec::new();
         dispatch_to_writer(Protocol::Auto, &fb, &mut out).unwrap();
 
@@ -398,7 +398,6 @@ mod tmux_passthrough {
 // ── Unsupported protocol errors ──────────────────────────────
 
 mod error_paths {
-    use super::*;
 
     #[test]
     fn unsupported_protocol_returns_error() {

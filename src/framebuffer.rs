@@ -377,8 +377,6 @@ mod tests {
         ) {
             let mut dst = [dr, dg, db, da];
             blend_over(&mut dst, &[r, g, b, a], src_alpha);
-            // Result alpha must be in [0, 255].
-            prop_assert!(dst[3] <= 255, "result alpha {} must be <= 255", dst[3]);
         }
 
         #[test]
@@ -395,9 +393,6 @@ mod tests {
         ) {
             let mut dst = [dr, dg, db, da];
             blend_over(&mut dst, &[r, g, b, a], src_alpha);
-            for i in 0..3 {
-                prop_assert!(dst[i] <= 255, "channel {} result {} must be <= 255", i, dst[i]);
-            }
         }
 
         #[test]
@@ -415,10 +410,7 @@ mod tests {
             let mut dst = [dr, dg, db, da];
             let before = dst;
             blend_over(&mut dst, &[r, g, b, a], extreme_alpha);
-            // Result must be valid u8 values.
-            for i in 0..4 {
-                prop_assert!(dst[i] <= 255, "channel {} must be <= 255", i);
-            }
+
             if extreme_alpha <= 0.0 {
                 // Negative alpha is clamped to 0 → noop.
                 prop_assert_eq!(dst, before, "negative alpha must be noop");

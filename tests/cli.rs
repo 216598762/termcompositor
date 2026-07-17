@@ -33,7 +33,7 @@ fn binary_runs_without_args() {
 
 #[test]
 fn binary_has_help_output() {
-    let (exit_code, stdout, stderr) = run_binary(&["--help"]);
+    let (exit_code, _stdout, stderr) = run_binary(&["--help"]);
     // The binary doesn't implement --help via clap yet; it will
     // fall through to normal execution. Just verify it exits 0.
     // TODO: update when clap is added to check for usage information.
