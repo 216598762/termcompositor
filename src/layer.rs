@@ -2728,8 +2728,8 @@ fn gradient_radial_new() {
         }
     );
 }#[allow(deprecated)]
-#[test]
-fn gradient_legacy_builder() {
+#[test]    // Intentionally tests the deprecated API for backwards compatibility.
+    fn gradient_legacy_builder() {
         let g = GradientLayer::linear(0, 0, 10, 10, [255; 4], [0; 4], 0, 0, 10, 10)
         .with_z(5)
         .with_name("grad");
@@ -2835,6 +2835,24 @@ fn gradient_zero_length_line() {
         assert_eq!(g.start_color, [0, 0, 0, 255]);
         assert_eq!(g.end_color, [255, 255, 255, 255]);
         assert!(matches!(g.kind, GradientKind::Linear { start_x: 0, start_y: 0, end_x: 100, end_y: 100 }));
+    }
+
+    #[test]
+    fn gradient_builder_zero_length_line() {
+        let g = GradientLayerBuilder::new_linear()
+            .at(0, 0)
+            .size(5, 5)
+            .colors([255; 4], [0; 4])
+            .linear_points(2, 2, 2, 2)
+            .build();
+        let mut fb = FrameBuffer::new(10, 10);
+        g.render(&mut fb, (0, 0), 1.0);
+        let pixel = fb.get_pixel(2, 2).unwrap();
+        assert_eq!(
+            pixel,
+            &[255, 255, 255, 255],
+            "zero-length gradient should render start_color"
+        );
     }
 
 // ─── SceneGraph tests ──────────────────────────────────────
