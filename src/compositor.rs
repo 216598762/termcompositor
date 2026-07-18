@@ -405,6 +405,173 @@ impl LayerStack {
         let fb = self.render_to_terminal(size);
         (fb, size)
     }
+
+    /// Renders `self` into `target` using diff-based rendering.
+    ///
+    /// On the first call (when `dirty` is empty), this is equivalent
+    /// to a full `render`. On subsequent calls, only layers whose
+    /// bounding boxes intersect the dirty regions are re-composited;
+    /// the rest of the framebuffer is preserved from the previous
+    /// frame.
+    ///
+    /// After rendering, `dirty` is cleared. Callers should mark
+    /// regions dirty before calling this method (e.g. when a layer
+    /// moves or changes opacity).
+    pub fn render_diff(&self, target: &mut FrameBuffer, dirty: &mut DirtyRegion) {
+        if dirty.is_clean() {
+            // First call or nothing marked dirty — full render.
+            CpuCompositor.compose(self, target);
+            return;
+        }
+
+        // Snapshot the regions that need re-compositing, then clear.
+        let regions: Vec<DirtyRect> = dirty.take_regions(target.width(), target.height());
+
+        // Render the entire stack into a temporary buffer.
+        let mut tmp = FrameBuffer::new(target.width(), target.height());
+        CpuCompositor.compose(self, &mut tmp);
+
+        // Copy only the dirty regions from tmp to target.
+        for r in &regions {
+            for y in r.y..r.y.saturating_add(r.height) {
+                for x in r.x..r.x.saturating_add(r.width) {
+                    if let (Some(src), Some(dst)) = (
+                        tmp.get_pixel(x, y),
+                        target.get_pixel_mut(x, y),
+                    ) {
+                        *dst = *src;
+                    }
+                }
+            }
+        }
+    }
+
+
+}
+
+/// A single rectangular dirty region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirtyRect {
+    /// Left edge, inclusive.
+    pub x: u32,
+    /// Top edge, inclusive.
+    pub y: u32,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+impl DirtyRect {
+    /// Creates a new dirty rectangle.
+    pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    /// Returns the right edge (exclusive).
+    pub fn right(&self) -> u32 {
+        self.x.saturating_add(self.width)
+    }
+
+    /// Returns the bottom edge (exclusive).
+    pub fn bottom(&self) -> u32 {
+        self.y.saturating_add(self.height)
+    }
+
+    /// Returns `true` if this rectangle intersects another.
+    pub fn intersects(&self, other: &DirtyRect) -> bool {
+        self.x < other.right()
+            && self.right() > other.x
+            && self.y < other.bottom()
+            && self.bottom() > other.y
+    }
+
+    /// Merges another rectangle into this one, expanding to
+    /// cover both.
+    pub fn merge(&mut self, other: &DirtyRect) {
+        let x1 = self.x.min(other.x);
+        let y1 = self.y.min(other.y);
+        let x2 = self.right().max(other.right());
+        let y2 = self.bottom().max(other.bottom());
+        self.x = x1;
+        self.y = y1;
+        self.width = x2 - x1;
+        self.height = y2 - y1;
+    }
+}
+
+/// Tracks dirty regions across frames for diff-based rendering.
+///
+/// Callers mark regions as dirty (e.g. when a layer moves or
+/// changes), then pass the tracker to [`LayerStack::render_diff`].
+/// After rendering, the dirty state is cleared automatically.
+#[derive(Debug, Clone)]
+pub struct DirtyRegion {
+    regions: Vec<DirtyRect>,
+    /// When `true`, the entire framebuffer is dirty (full re-render).
+    full: bool,
+}
+
+impl DirtyRegion {
+    /// Creates a new, empty dirty region tracker.
+    pub fn new() -> Self {
+        Self {
+            regions: Vec::new(),
+            full: false,
+        }
+    }
+
+    /// Marks the entire framebuffer as dirty.
+    pub fn mark_full(&mut self) {
+        self.full = true;
+        self.regions.clear();
+    }
+
+    /// Marks a rectangular region as dirty.
+    pub fn mark_rect(&mut self, rect: DirtyRect) {
+        if self.full {
+            return;
+        }
+        // Try to merge with an existing region.
+        if let Some(existing) = self.regions.iter_mut().find(|r| r.intersects(&rect)) {
+            existing.merge(&rect);
+        } else {
+            self.regions.push(rect);
+        }
+    }
+
+    /// Marks a point as dirty (1x1 region).
+    pub fn mark_point(&mut self, x: u32, y: u32) {
+        self.mark_rect(DirtyRect::new(x, y, 1, 1));
+    }
+
+    /// Returns `true` if no regions are marked dirty.
+    pub fn is_clean(&self) -> bool {
+        self.regions.is_empty() && !self.full
+    }
+
+    /// Returns the number of dirty regions.
+    pub fn region_count(&self) -> usize {
+        if self.full { 1 } else { self.regions.len() }
+    }
+
+    /// Takes all regions out of the tracker (leaving it empty).
+    /// If `full` was set, returns a single region covering the
+    /// entire framebuffer.
+    fn take_regions(&mut self, width: u32, height: u32) -> Vec<DirtyRect> {
+        if self.full {
+            self.full = false;
+            vec![DirtyRect::new(0, 0, width, height)]
+        } else {
+            std::mem::take(&mut self.regions)
+        }
+    }
+}
+
+impl Default for DirtyRegion {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Default for LayerStack {
@@ -419,6 +586,7 @@ mod tests {
     use crate::framebuffer::FrameBuffer;
     use crate::layer::SolidColor;
     use crate::terminal::TerminalSize;
+    use super::{DirtyRect, DirtyRegion};
 
     #[test]
     fn push_assigns_unique_ids() {
@@ -798,5 +966,107 @@ mod tests {
         let entry = s.find_by_name("dup").unwrap();
         // First pushed entry (red) should be returned.
         assert_eq!(entry.name(), "dup");
+    }
+
+    // ─── Diff-Based Rendering tests ───────────────────────────
+
+    #[test]
+    fn dirty_region_new_is_clean() {
+        let d = DirtyRegion::new();
+        assert!(d.is_clean());
+        assert_eq!(d.region_count(), 0);
+    }
+
+    #[test]
+    fn dirty_rect_intersects() {
+        let a = DirtyRect::new(0, 0, 10, 10);
+        let b = DirtyRect::new(5, 5, 10, 10);
+        let c = DirtyRect::new(20, 20, 5, 5);
+        assert!(a.intersects(&b));
+        assert!(!a.intersects(&c));
+    }
+
+    #[test]
+    fn dirty_rect_merge() {
+        let mut a = DirtyRect::new(0, 0, 5, 5);
+        let b = DirtyRect::new(3, 3, 5, 5);
+        a.merge(&b);
+        assert_eq!(a, DirtyRect::new(0, 0, 8, 8));
+    }
+
+    #[test]
+    fn dirty_region_mark_rect() {
+        let mut d = DirtyRegion::new();
+        d.mark_rect(DirtyRect::new(0, 0, 10, 10));
+        assert!(!d.is_clean());
+        assert_eq!(d.region_count(), 1);
+    }
+
+    #[test]
+    fn dirty_region_mark_full() {
+        let mut d = DirtyRegion::new();
+        d.mark_rect(DirtyRect::new(0, 0, 10, 10));
+        d.mark_full();
+        assert_eq!(d.region_count(), 1); // full counts as 1
+    }
+
+    #[test]
+    fn render_diff_full_on_first_call() {
+        let mut s = LayerStack::new();
+        s.push(RectLayer::new(5, 5, 10, 10, [255, 0, 0, 255]));
+
+        let mut fb = FrameBuffer::new(20, 20);
+        let mut dirty = DirtyRegion::new();
+        dirty.mark_full();
+
+        s.render_diff(&mut fb, &mut dirty);
+
+        // After render, dirty should be clean.
+        assert!(dirty.is_clean());
+        // The rect should be visible.
+        assert_eq!(fb.get_pixel(7, 7), Some(&[255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn render_diff_skips_clean_regions() {
+        let mut s = LayerStack::new();
+        s.push(RectLayer::new(0, 0, 20, 20, [0, 0, 255, 255]));
+
+        let mut fb = FrameBuffer::new(20, 20);
+        let mut dirty = DirtyRegion::new();
+        dirty.mark_full();
+        s.render_diff(&mut fb, &mut dirty);
+
+        // Write garbage to a region that won't be re-rendered.
+        for px in fb.pixels_mut()[0..5].iter_mut() {
+            *px = [128, 128, 128, 128];
+        }
+
+        // Mark only a small region dirty — the garbage should survive.
+        dirty.mark_rect(DirtyRect::new(10, 10, 5, 5));
+        s.render_diff(&mut fb, &mut dirty);
+
+        // The untouched pixels should still be garbage.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[128, 128, 128, 128]));
+        // The dirty region should be re-rendered.
+        assert_eq!(fb.get_pixel(12, 12), Some(&[0, 0, 255, 255]));
+    }
+
+    #[test]
+    fn render_diff_produces_same_result_as_full_render() {
+        let mut s = LayerStack::new();
+        s.push(RectLayer::new(3, 3, 8, 8, [0, 255, 0, 255]));
+
+        // Full render.
+        let mut fb_full = FrameBuffer::new(20, 20);
+        s.render(&mut fb_full);
+
+        // Diff render with full dirty.
+        let mut fb_diff = FrameBuffer::new(20, 20);
+        let mut dirty = DirtyRegion::new();
+        dirty.mark_full();
+        s.render_diff(&mut fb_diff, &mut dirty);
+
+        assert_eq!(fb_full.pixels(), fb_diff.pixels());
     }
 }
