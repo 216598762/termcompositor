@@ -138,6 +138,8 @@ pub struct RectLayer {
     pub height: u32,
     /// `[R, G, B, A]` in `0..=255` per channel.
     pub color: [u8; 4],
+    /// Corner radius in pixels. `0` means sharp corners.
+    pub border_radius: u32,
     z: u32,
     name: String,
 }
@@ -152,6 +154,7 @@ impl RectLayer {
             width,
             height,
             color,
+            border_radius: 0,
             z: 0,
             name: format!("Rect({x},{y},{width}x{height})"),
         }
@@ -169,6 +172,48 @@ impl RectLayer {
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
+    }
+
+    /// Builder: sets the corner radius in pixels.
+    ///
+    /// When `radius > 0`, the four corners of the rectangle are
+    /// clipped to circular arcs. The effective radius is clamped
+    /// to `min(width, height) / 2`.
+    #[must_use]
+    pub fn with_border_radius(mut self, radius: u32) -> Self {
+        self.border_radius = radius;
+        self
+    }
+
+    /// Returns `true` if `(sx, sy)` falls outside the rounded
+    /// corner arcs.  `r` is the clamped radius, and `w`/`h` are
+    /// the rectangle dimensions.
+    fn is_outside_radius(sx: u32, sy: u32, w: u32, h: u32, r: u32) -> bool {
+        // Top-left corner.
+        if sx < r && sy < r {
+            let dx = r as f32 - sx as f32 - 0.5;
+            let dy = r as f32 - sy as f32 - 0.5;
+            return dx * dx + dy * dy > r as f32 * r as f32;
+        }
+        // Top-right corner.
+        if sx >= w - r && sy < r {
+            let dx = sx as f32 - (w - r) as f32 + 0.5;
+            let dy = r as f32 - sy as f32 - 0.5;
+            return dx * dx + dy * dy > r as f32 * r as f32;
+        }
+        // Bottom-left corner.
+        if sx < r && sy >= h - r {
+            let dx = r as f32 - sx as f32 - 0.5;
+            let dy = sy as f32 - (h - r) as f32 + 0.5;
+            return dx * dx + dy * dy > r as f32 * r as f32;
+        }
+        // Bottom-right corner.
+        if sx >= w - r && sy >= h - r {
+            let dx = sx as f32 - (w - r) as f32 + 0.5;
+            let dy = sy as f32 - (h - r) as f32 + 0.5;
+            return dx * dx + dy * dy > r as f32 * r as f32;
+        }
+        false
     }
 }
 
@@ -189,8 +234,13 @@ impl Layer for RectLayer {
         let ox = self.x.saturating_add(offset.0);
         let oy = self.y.saturating_add(offset.1);
         let effective = (f32::from(self.color[3]) / 255.0 * opacity).clamp(0.0, 1.0);
+        let r = self.border_radius.min(self.width / 2).min(self.height / 2);
         for sy in 0..self.height {
             for sx in 0..self.width {
+                // Skip pixels outside the rounded corners.
+                if r > 0 && Self::is_outside_radius(sx, sy, self.width, self.height, r) {
+                    continue;
+                }
                 let tx = ox + sx;
                 let ty = oy + sy;
                 if let Some(px) = target.get_pixel_mut(tx, ty) {
@@ -1255,6 +1305,9 @@ pub struct DropShadow {
     pub blur_radius: u32,
     /// Shadow colour `[R, G, B, A]`.
     pub shadow_color: [u8; 4],
+    /// Shadow spread in pixels. Positive values dilate (expand)
+    /// the shadow shape before blurring; negative values shrink it.
+    pub spread: i32,
     z: u32,
     name: String,
 }
@@ -1267,6 +1320,7 @@ impl DropShadow {
             offset: (2, 2),
             blur_radius: 2,
             shadow_color: [0, 0, 0, 80],
+            spread: 0,
             z: 0,
             name: "DropShadow".to_owned(),
         }
@@ -1293,6 +1347,25 @@ impl DropShadow {
         self
     }
 
+    /// Builder: sets the shadow spread in pixels. Positive values
+    /// dilate (expand) the shadow shape before blurring; negative
+    /// values shrink it.
+    #[must_use]
+    pub fn with_spread(mut self, spread: i32) -> Self {
+        self.spread = spread;
+        self
+    }
+
+    /// Builder: configures a glow effect. This is a convenience
+    /// method equivalent to setting a bright `shadow_color` with
+    /// a zero offset and a moderate blur radius.
+    #[must_use]
+    pub fn with_glow(self, color: [u8; 4], blur: u32) -> Self {
+        self.with_shadow_color(color)
+            .with_offset(0, 0)
+            .with_blur(blur)
+    }
+
     /// Builder: sets the default z-order.
     #[must_use]
     pub fn with_z(mut self, z: u32) -> Self {
@@ -1310,6 +1383,39 @@ impl DropShadow {
     /// Returns a reference to the inner layer.
     pub fn inner(&self) -> &dyn Layer {
         &*self.inner
+    }
+
+    /// Dilates (positive spread) or erodes (negative spread) the
+    /// alpha channel in a pixel buffer. This is used to expand or
+    /// shrink the shadow shape before blurring.
+    fn spread_alpha(pixels: &mut [[u8; 4]], width: u32, height: u32, spread: i32) {
+        if spread == 0 || width == 0 || height == 0 {
+            return;
+        }
+        let w = width as usize;
+        let h = height as usize;
+        let s = spread.unsigned_abs() as usize;
+        let mut out = vec![[0u8; 4]; w * h];
+
+        for y in 0..h {
+            for x in 0..w {
+                // Find the max/min alpha in the neighborhood.
+                let mut max_alpha: u8 = 0;
+                let mut min_alpha: u8 = 255;
+                for dy in y.saturating_sub(s)..=(y + s).min(h - 1) {
+                    for dx in x.saturating_sub(s)..=(x + s).min(w - 1) {
+                        let a = pixels[dy * w + dx][3];
+                        max_alpha = max_alpha.max(a);
+                        min_alpha = min_alpha.min(a);
+                    }
+                }
+                let src = pixels[y * w + x];
+                let alpha = if spread > 0 { max_alpha } else { min_alpha };
+                out[y * w + x] = [src[0], src[1], src[2], alpha];
+            }
+        }
+
+        pixels.copy_from_slice(&out);
     }
 
     /// Applies a simple box blur to the pixel buffer in-place.
@@ -1390,7 +1496,12 @@ impl Layer for DropShadow {
         let mut shadow_buf = FrameBuffer::new(w, h);
         self.inner.render(&mut shadow_buf, offset, 1.0);
 
-        // Step 2: Apply box blur to create the shadow.
+        // Step 2: Apply spread (dilate/erode) if nonzero.
+        if self.spread != 0 {
+            Self::spread_alpha(shadow_buf.pixels_mut(), w, h, self.spread);
+        }
+
+        // Step 3: Apply box blur to create the shadow.
         Self::box_blur(shadow_buf.pixels_mut(), w, h, self.blur_radius);
 
         // Step 3: Composite the blurred shadow at the offset.
@@ -1662,6 +1773,191 @@ impl Layer for GradientLayer {
                         let colour = Self::interpolate(t, self.start_color, self.end_color);
                         let src_alpha = f32::from(colour[3]) / 255.0 * effective;
                         crate::framebuffer::blend_over(px, &colour, src_alpha);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Type alias for [`DropShadow`]. Provides a more descriptive
+/// name when the wrapper is used for shadow/glow effects.
+pub type ShadowLayer = DropShadow;
+
+/// Describes the clipping region for a [`ClipLayer`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipRegion {
+    /// Clip to an explicit rectangle in target-space coordinates.
+    Rect(crate::geometry::Rect),
+    /// Clip to the inner layer's own [`Layer::bounds`].
+    /// Falls back to the full target if the inner layer reports
+    /// `None` bounds.
+    LayerBounds,
+}
+
+/// A wrapper layer that clips an inner layer to a rectangular region.
+///
+/// `ClipLayer` renders the inner layer into a temporary buffer,
+/// then copies only the pixels that fall within the clip region
+/// to the target. This is useful for confining text, images, or
+/// other layers to a specific area without modifying the inner
+/// layer itself.
+///
+/// The clip region can be an explicit rectangle or derived from
+/// the inner layer's own [`Layer::bounds`].
+///
+/// # Example
+///
+/// ```
+/// use termcompositor::{ClipLayer, ClipRegion, RectLayer, Layer};
+/// use termcompositor::FrameBuffer;
+/// use termcompositor::geometry::Rect;
+///
+/// let inner = RectLayer::new(0, 0, 40, 20, [255, 0, 0, 255]);
+/// let clip = ClipLayer::new(Box::new(inner))
+///     .with_region(ClipRegion::Rect(Rect::new(5, 5, 10, 10)));
+///
+/// let mut fb = FrameBuffer::new(40, 20);
+/// clip.render(&mut fb, (0, 0), 1.0);
+/// ```
+pub struct ClipLayer {
+    inner: Box<dyn Layer>,
+    region: ClipRegion,
+    z: u32,
+    name: String,
+}
+
+impl ClipLayer {
+    /// Creates a new clip wrapper around the given layer.
+    /// Defaults to clipping to the inner layer's bounds.
+    pub fn new(inner: Box<dyn Layer>) -> Self {
+        Self {
+            inner,
+            region: ClipRegion::LayerBounds,
+            z: 0,
+            name: "ClipLayer".to_owned(),
+        }
+    }
+
+    /// Builder: sets the clip region.
+    #[must_use]
+    pub fn with_region(mut self, region: ClipRegion) -> Self {
+        self.region = region;
+        self
+    }
+
+    /// Builder: sets the default z-order.
+    #[must_use]
+    pub fn with_z(mut self, z: u32) -> Self {
+        self.z = z;
+        self
+    }
+
+    /// Builder: sets a human-readable name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Returns a reference to the inner layer.
+    pub fn inner(&self) -> &dyn Layer {
+        &*self.inner
+    }
+
+    /// Returns a reference to the clip region.
+    pub fn region(&self) -> &ClipRegion {
+        &self.region
+    }
+
+    /// Resolves the effective clip rectangle. For `LayerBounds` mode,
+    /// returns the inner layer's bounds (in layer-local coordinates).
+    /// For `Rect` mode, returns the explicit rectangle.
+    fn resolve_clip(&self) -> Option<crate::geometry::Rect> {
+        match &self.region {
+            ClipRegion::Rect(r) => Some(*r),
+            ClipRegion::LayerBounds => self.inner.bounds(),
+        }
+    }
+}
+
+impl Layer for ClipLayer {
+    fn z_order(&self) -> u32 {
+        self.z
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn bounds(&self) -> Option<crate::geometry::Rect> {
+        // The clipped bounds are the intersection of the inner
+        // layer's bounds and the clip region.
+        match &self.region {
+            ClipRegion::Rect(r) => self.inner.bounds().map(|ib| {
+                let ix = ib.x.max(r.x);
+                let iy = ib.y.max(r.y);
+                let ir = ib.x.saturating_add(ib.width).min(r.x.saturating_add(r.width));
+                let ib2 = ib.y.saturating_add(ib.height).min(r.y.saturating_add(r.height));
+                let iw = ir.saturating_sub(ix);
+                let ih = ib2.saturating_sub(iy);
+                crate::geometry::Rect::new(ix, iy, iw, ih)
+            }).or(Some(*r)),
+            ClipRegion::LayerBounds => self.inner.bounds(),
+        }
+    }
+
+    fn render(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
+        let effective = opacity.clamp(0.0, 1.0);
+        if effective == 0.0 {
+            return;
+        }
+
+        let tw = target.width();
+        let th = target.height();
+        if tw == 0 || th == 0 {
+            return;
+        }
+
+        // Resolve the clip rectangle in target-space coordinates.
+        let clip = match self.resolve_clip() {
+            Some(r) => r,
+            None => {
+                // No clip region — render inner layer directly.
+                self.inner.render(target, offset, effective);
+                return;
+            }
+        };
+
+        // Apply the offset to the clip region to get target-space coords.
+        let cx = clip.x.saturating_add(offset.0);
+        let cy = clip.y.saturating_add(offset.1);
+        let cw = clip.width;
+        let ch = clip.height;
+
+        if cw == 0 || ch == 0 {
+            return;
+        }
+
+        // Render the inner layer into a full-size temporary buffer.
+        // O(W×H) memory — same approach as DropShadow. A smaller
+        // clip-sized buffer would require i32 offsets which the
+        // Layer trait doesn't support.
+        let mut tmp = FrameBuffer::new(tw, th);
+        self.inner.render(&mut tmp, offset, 1.0);
+
+        // Copy only the clipped region from tmp to target.
+        for sy in 0..ch {
+            for sx in 0..cw {
+                let tx = cx + sx;
+                let ty = cy + sy;
+                if let Some(src) = tmp.get_pixel(tx, ty) {
+                    if src[3] == 0 {
+                        continue;
+                    }
+                    let src_alpha = f32::from(src[3]) / 255.0 * effective;
+                    if let Some(px) = target.get_pixel_mut(tx, ty) {
+                        crate::framebuffer::blend_over(px, src, src_alpha);
                     }
                 }
             }
@@ -2922,6 +3218,131 @@ mod tests {
         assert!(has_content, "should produce content");
     }
 
+    // ─── Spread / Glow tests ────────────────────────────────────
+
+    #[test]
+    fn drop_shadow_positive_spread_expands_shadow() {
+        let inner = RectLayer::new(5, 5, 2, 2, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(0, 0)
+            .with_blur(0)
+            .with_spread(2)
+            .with_shadow_color([0, 0, 0, 255]);
+
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 1.0);
+
+        // The original 2x2 rect at (5,5) should be white.
+        assert_eq!(fb.get_pixel(5, 5), Some(&[255, 255, 255, 255]));
+
+        // With spread=2, shadow should extend beyond the rect.
+        assert_eq!(fb.get_pixel(3, 3), Some(&[0, 0, 0, 255]));
+        assert_eq!(fb.get_pixel(8, 8), Some(&[0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn drop_shadow_negative_spread_shrinks_shadow() {
+        // With offset (5,5) the shadow peeks out at the bottom-right
+        // of the inner layer. Negative spread erodes the shadow
+        // inward, so fewer shadow pixels are visible.
+        let inner = RectLayer::new(5, 5, 10, 10, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(5, 5)
+            .with_blur(0)
+            .with_spread(-3)
+            .with_shadow_color([0, 0, 0, 255]);
+
+        let mut fb = FrameBuffer::new(30, 30);
+        ds.render(&mut fb, (0, 0), 1.0);
+
+        // Count shadow-only pixels (bottom-right of inner layer).
+        // Shadow at (10,10) to (19,19), inner at (5,5) to (14,14).
+        // Shadow-only region: x=15..19, y=15..19.
+        let mut shadow_pixels_with_spread = 0u32;
+        for y in 15..20 {
+            for x in 15..20 {
+                if let Some(p) = fb.get_pixel(x, y) {
+                    if p[3] > 0 { shadow_pixels_with_spread += 1; }
+                }
+            }
+        }
+
+        // Compare against zero-spread.
+        let inner2 = RectLayer::new(5, 5, 10, 10, [255, 255, 255, 255]);
+        let ds2 = DropShadow::new(Box::new(inner2))
+            .with_offset(5, 5)
+            .with_blur(0)
+            .with_spread(0)
+            .with_shadow_color([0, 0, 0, 255]);
+        let mut fb2 = FrameBuffer::new(30, 30);
+        ds2.render(&mut fb2, (0, 0), 1.0);
+        let mut shadow_pixels_no_spread = 0u32;
+        for y in 15..20 {
+            for x in 15..20 {
+                if let Some(p) = fb2.get_pixel(x, y) {
+                    if p[3] > 0 { shadow_pixels_no_spread += 1; }
+                }
+            }
+        }
+
+        assert!(shadow_pixels_no_spread > 0,
+            "zero spread should have shadow pixels in the peek region");
+        assert!(shadow_pixels_with_spread < shadow_pixels_no_spread,
+            "negative spread should shrink shadow: {shadow_pixels_with_spread} < {shadow_pixels_no_spread}");
+    }
+
+    #[test]
+    fn drop_shadow_zero_spread_is_noop() {
+        let inner = RectLayer::new(5, 5, 2, 2, [255, 255, 255, 255]);
+        let ds = DropShadow::new(Box::new(inner))
+            .with_offset(0, 0)
+            .with_blur(0)
+            .with_spread(0)
+            .with_shadow_color([0, 0, 0, 255]);
+
+        let mut fb = FrameBuffer::new(20, 20);
+        ds.render(&mut fb, (0, 0), 1.0);
+
+        assert_eq!(fb.get_pixel(5, 5), Some(&[255, 255, 255, 255]));
+        assert_eq!(fb.get_pixel(6, 6), Some(&[255, 255, 255, 255]));
+        assert_eq!(fb.get_pixel(4, 4), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn drop_shadow_glow_sets_zero_offset() {
+        let inner = RectLayer::new(3, 3, 4, 4, [255, 255, 255, 255]);
+        let glow = DropShadow::new(Box::new(inner))
+            .with_glow([255, 200, 0, 200], 3);
+
+        assert_eq!(glow.offset, (0, 0));
+        assert_eq!(glow.blur_radius, 3);
+        assert_eq!(glow.shadow_color, [255, 200, 0, 200]);
+    }
+
+    #[test]
+    fn drop_shadow_glow_render_produces_content() {
+        let inner = RectLayer::new(5, 5, 2, 2, [255, 255, 255, 255]);
+        let glow = DropShadow::new(Box::new(inner))
+            .with_glow([255, 200, 0, 200], 3);
+
+        let mut fb = FrameBuffer::new(20, 20);
+        glow.render(&mut fb, (0, 0), 1.0);
+
+        assert_eq!(fb.get_pixel(5, 5), Some(&[255, 255, 255, 255]));
+        let glow_pixel = fb.get_pixel(4, 4).unwrap();
+        assert!(glow_pixel[3] > 0, "glow should produce non-transparent pixels");
+    }
+
+    #[test]
+    fn shadow_layer_type_alias_works() {
+        let inner = RectLayer::new(0, 0, 5, 5, [255, 0, 0, 255]);
+        let shadow: super::ShadowLayer = DropShadow::new(Box::new(inner));
+        let mut fb = FrameBuffer::new(10, 10);
+        shadow.render(&mut fb, (0, 0), 1.0);
+        let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
+        assert!(any_nonzero, "ShadowLayer should render content");
+    }
+
 
     #[test]
     fn border_layer_corners_not_double_drawn() {
@@ -3692,5 +4113,228 @@ mod font_rasterizer_extra {
         t.render(&mut fb, (0, 0), 1.0);
         let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
         assert!(!any_nonzero, "empty text render should not change framebuffer");
+    }
+
+    // ─── ClipLayer tests ───────────────────────────────────────
+
+    use crate::geometry::Rect;
+    use super::{ClipLayer, ClipRegion, RectLayer};
+
+    // ─── Rounded corners tests ──────────────────────────────────
+
+    #[test]
+    fn rect_layer_zero_radius_is_sharp() {
+        let r = RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255]);
+        let mut fb = FrameBuffer::new(10, 10);
+        r.render(&mut fb, (0, 0), 1.0);
+        // All pixels should be red.
+        for px in fb.pixels() {
+            assert_eq!(*px, [255, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn rect_layer_radius_clips_corners() {
+        let r = RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255])
+            .with_border_radius(3);
+        let mut fb = FrameBuffer::new(10, 10);
+        r.render(&mut fb, (0, 0), 1.0);
+
+        // Center pixel should be red.
+        assert_eq!(fb.get_pixel(5, 5), Some(&[255, 0, 0, 255]));
+
+        // Corners should be transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(9, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(0, 9), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(9, 9), Some(&[0, 0, 0, 0]));
+
+        // Pixels just inside the arc should be red.
+        assert_eq!(fb.get_pixel(1, 1), Some(&[255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn rect_layer_large_radius_clips_more() {
+        let r = RectLayer::new(0, 0, 20, 20, [0, 255, 0, 255])
+            .with_border_radius(8);
+        let mut fb = FrameBuffer::new(20, 20);
+        r.render(&mut fb, (0, 0), 1.0);
+
+        // Center should be green.
+        assert_eq!(fb.get_pixel(10, 10), Some(&[0, 255, 0, 255]));
+
+        // Extreme corners should be transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(19, 19), Some(&[0, 0, 0, 0]));
+
+        // Near the corner arc boundary.
+        assert_eq!(fb.get_pixel(1, 1), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(2, 2), Some(&[0, 255, 0, 255]));
+    }
+
+    #[test]
+    fn rect_layer_radius_clamped_to_half() {
+        // radius > min(w,h)/2 should be clamped.
+        let r = RectLayer::new(0, 0, 6, 4, [255, 0, 0, 255])
+            .with_border_radius(100);
+        let mut fb = FrameBuffer::new(6, 4);
+        r.render(&mut fb, (0, 0), 1.0);
+
+        // Center pixels should be filled.
+        assert_eq!(fb.get_pixel(3, 2), Some(&[255, 0, 0, 255]));
+        // Corners clipped.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn rect_layer_with_position_and_radius() {
+        let r = RectLayer::new(5, 5, 8, 8, [0, 0, 255, 255])
+            .with_border_radius(2);
+        let mut fb = FrameBuffer::new(20, 20);
+        r.render(&mut fb, (0, 0), 1.0);
+
+        // Inside the rect, center should be blue.
+        assert_eq!(fb.get_pixel(9, 9), Some(&[0, 0, 255, 255]));
+
+        // Corner of the rect (5,5) should be transparent.
+        assert_eq!(fb.get_pixel(5, 5), Some(&[0, 0, 0, 0]));
+
+        // Outside the rect entirely.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn rect_layer_zero_radius_preserves_all_pixels() {
+        // Ensure border_radius=0 (default) doesn't skip any pixels.
+        let r = RectLayer::new(2, 2, 6, 6, [255, 255, 0, 255]);
+        let mut fb = FrameBuffer::new(10, 10);
+        r.render(&mut fb, (0, 0), 1.0);
+
+        for sy in 2..8 {
+            for sx in 2..8 {
+                assert_eq!(fb.get_pixel(sx, sy), Some(&[255, 255, 0, 255]));
+            }
+        }
+    }
+
+    // ─── ClipLayer tests ───────────────────────────────────────
+
+    #[test]
+    fn clip_layer_rect_clips_content() {
+        // A 20x10 rect clipped to a 5x5 region at (2,2).
+        let inner = RectLayer::new(0, 0, 20, 10, [255, 0, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(2, 2, 5, 5)));
+
+        let mut fb = FrameBuffer::new(20, 10);
+        clip.render(&mut fb, (0, 0), 1.0);
+
+        // Pixels inside the clip rect should be red.
+        assert_eq!(fb.get_pixel(2, 2), Some(&[255, 0, 0, 255]));
+        assert_eq!(fb.get_pixel(6, 6), Some(&[255, 0, 0, 255]));
+
+        // Pixels outside the clip rect should be transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(8, 8), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn clip_layer_layer_bounds_clips_to_inner() {
+        // LayerBounds mode should clip to the inner layer's bounds.
+        let inner = RectLayer::new(5, 5, 10, 10, [0, 255, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::LayerBounds);
+
+        let mut fb = FrameBuffer::new(30, 30);
+        clip.render(&mut fb, (0, 0), 1.0);
+
+        // Inside inner layer bounds → green.
+        assert_eq!(fb.get_pixel(5, 5), Some(&[0, 255, 0, 255]));
+        assert_eq!(fb.get_pixel(14, 14), Some(&[0, 255, 0, 255]));
+
+        // Outside inner layer bounds → transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(20, 20), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn clip_layer_zero_size_region_is_noop() {
+        let inner = RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(0, 0, 0, 0)));
+
+        let mut fb = FrameBuffer::new(10, 10);
+        clip.render(&mut fb, (0, 0), 1.0);
+
+        // Nothing should be rendered.
+        for px in fb.pixels() {
+            assert_eq!(*px, [0, 0, 0, 0]);
+        }
+    }
+
+    #[test]
+    fn clip_layer_bounds_returns_intersection() {
+        let inner = RectLayer::new(0, 0, 20, 20, [255, 0, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(5, 5, 10, 10)));
+
+        let bounds = clip.bounds().unwrap();
+        assert_eq!(bounds.x, 5);
+        assert_eq!(bounds.y, 5);
+        assert_eq!(bounds.width, 10);
+        assert_eq!(bounds.height, 10);
+    }
+
+    #[test]
+    fn clip_layer_zero_opacity_is_noop() {
+        let inner = RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(0, 0, 10, 10)));
+
+        let mut fb = FrameBuffer::new(10, 10);
+        clip.render(&mut fb, (0, 0), 0.0);
+
+        for px in fb.pixels() {
+            assert_eq!(*px, [0, 0, 0, 0]);
+        }
+    }
+
+    #[test]
+    fn clip_layer_with_offset_shifts_clip_region() {
+        let inner = RectLayer::new(0, 0, 20, 20, [255, 0, 0, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(0, 0, 5, 5)));
+
+        let mut fb = FrameBuffer::new(30, 30);
+        // Offset (3, 3) should shift the clip region to (3,3)..(8,8).
+        clip.render(&mut fb, (3, 3), 1.0);
+
+        assert_eq!(fb.get_pixel(3, 3), Some(&[255, 0, 0, 255]));
+        assert_eq!(fb.get_pixel(7, 7), Some(&[255, 0, 0, 255]));
+        // Outside the shifted clip → transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        assert_eq!(fb.get_pixel(10, 10), Some(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn clip_layer_partial_overlap() {
+        // Inner layer is 10x10 at (0,0), clip rect is 8x8 at (5,5).
+        // Only the overlapping region (5,5)..(8,8) should be visible.
+        let inner = RectLayer::new(0, 0, 10, 10, [0, 0, 255, 255]);
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(5, 5, 8, 8)));
+
+        let mut fb = FrameBuffer::new(20, 20);
+        clip.render(&mut fb, (0, 0), 1.0);
+
+        // Inside both inner and clip → blue.
+        assert_eq!(fb.get_pixel(5, 5), Some(&[0, 0, 255, 255]));
+        assert_eq!(fb.get_pixel(7, 7), Some(&[0, 0, 255, 255]));
+
+        // Inside clip but outside inner → transparent.
+        assert_eq!(fb.get_pixel(10, 10), Some(&[0, 0, 0, 0]));
+
+        // Inside inner but outside clip → transparent.
+        assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
     }
 }

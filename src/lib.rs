@@ -89,7 +89,7 @@ pub use geometry::{Rect, Transform};
 pub use layer::ImageLayer;
 #[cfg(feature = "font-rasterizer")]
 pub use layer::FontSource;
-pub use layer::{BorderLayer, CanvasLayer, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SolidColor, TextLayer};
+pub use layer::{BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, ShadowLayer, SolidColor, TextLayer};
 pub use terminal::TerminalSize;
 
 // Re-export animation module at crate root for convenience.

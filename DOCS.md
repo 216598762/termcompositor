@@ -10,6 +10,9 @@ This guide covers how to use `termcompositor` as a library and as a CLI tool.
 - [Library usage](#library-usage)
 - [Animation loop](#animation-loop)
 - [Layer transforms](#layer-transforms)
+- [Layer clipping](#layer-clipping)
+- [Rounded corners](#rounded-corners)
+- [Shadow and glow effects](#shadow-and-glow-effects)
 - [CLI usage](#cli-usage)
 - [Feature flags](#feature-flags)
 - [Protocol auto-detection](#protocol-auto-detection)
@@ -401,6 +404,129 @@ let (lx, ly) = t.apply_inverse(tx, ty);
 assert!((lx - 10.0).abs() < 1e-5);
 assert!((ly - 0.0).abs() < 1e-5);
 ```
+
+---
+
+## Layer clipping
+
+`ClipLayer` wraps any inner layer and clips its rendering to a
+rectangular region. Two clipping modes are available:
+
+- **`ClipRegion::Rect(rect)`** — clip to an explicit rectangle in
+  target-space coordinates.
+- **`ClipRegion::LayerBounds`** — clip to the inner layer's own
+  [`Layer::bounds`] (falls back to no clipping if the inner layer
+  reports `None` bounds).
+
+### Quick start
+
+```rust
+use termcompositor::{ClipLayer, ClipRegion, RectLayer};
+use termcompositor::geometry::Rect;
+
+let inner = RectLayer::new(0, 0, 40, 20, [255, 0, 0, 255]);
+let clip = ClipLayer::new(Box::new(inner))
+    .with_region(ClipRegion::Rect(Rect::new(5, 5, 10, 10)));
+```
+
+Or clip to the inner layer's own bounds:
+
+```rust
+let clip = ClipLayer::new(Box::new(inner))
+    .with_region(ClipRegion::LayerBounds);
+```
+
+### How clipping works
+
+The compositor renders the inner layer into a full-size temporary
+buffer, then copies only the pixels within the clip region to the
+target. This is the same approach used by `DropShadow`.
+
+---
+
+## Rounded corners
+
+`RectLayer` supports rounded corners via the `border_radius` field
+and `with_border_radius(radius)` builder method.
+
+```rust
+use termcompositor::RectLayer;
+
+let rect = RectLayer::new(5, 5, 40, 20, [255, 0, 0, 255])
+    .with_border_radius(8);
+```
+
+When `radius > 0`, the four corners are clipped to circular arcs.
+The effective radius is clamped to `min(width, height) / 2`.
+
+| Method | Description |
+|---|---|
+| `RectLayer::new(…)` | Creates a rectangle with `border_radius = 0` (sharp corners). |
+| `.with_border_radius(r)` | Sets the corner radius in pixels. |
+
+---
+
+## Shadow and glow effects
+
+`DropShadow` (aliased as `ShadowLayer`) wraps any inner layer and
+adds a blurred shadow behind it. New in v0.15.0: **spread** for
+shadow dilation/erosion, and **glow** for centered light effects.
+
+### Drop shadow
+
+```rust
+use termcompositor::{DropShadow, RectLayer};
+
+let inner = RectLayer::new(5, 5, 10, 5, [255, 255, 255, 255]);
+let shadow = DropShadow::new(Box::new(inner))
+    .with_offset(2, 2)
+    .with_blur(3)
+    .with_shadow_color([0, 0, 0, 128]);
+```
+
+### Spread
+
+Positive spread dilates (expands) the shadow shape before blurring;
+negative spread erodes (shrinks) it.
+
+```rust
+let shadow = DropShadow::new(Box::new(inner))
+    .with_spread(3)   // expand shadow by 3px
+    .with_blur(2)
+    .with_shadow_color([0, 0, 0, 100]);
+```
+
+### Glow
+
+A glow is a centered shadow with zero offset. Use the `with_glow`
+convenience builder:
+
+```rust
+let glow = DropShadow::new(Box::new(inner))
+    .with_glow([255, 200, 0, 200], 4);  // color, blur radius
+```
+
+This is equivalent to:
+
+```rust
+let glow = DropShadow::new(Box::new(inner))
+    .with_shadow_color([255, 200, 0, 200])
+    .with_offset(0, 0)
+    .with_blur(4);
+```
+
+### API reference
+
+| Method | Description |
+|---|---|
+| `DropShadow::new(inner)` | Default shadow: offset (2,2), blur 2, black 80% alpha. |
+| `.with_offset(x, y)` | Shadow displacement in pixels. |
+| `.with_blur(radius)` | Box blur radius. |
+| `.with_shadow_color(rgba)` | Shadow/glow colour. |
+| `.with_spread(pixels)` | Dilate (+) or erode (−) the shadow shape before blur. |
+| `.with_glow(color, blur)` | Convenience: bright colour + zero offset + blur. |
+
+`ShadowLayer` is a type alias for `DropShadow`.
 
 ---
 
