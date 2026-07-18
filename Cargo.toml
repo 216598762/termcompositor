@@ -31,6 +31,7 @@ publish = true
 # `sixel-encoder`) and `image-decoder` remain opt-in so the
 # default build stays dependency-light.
 default = ["font-rasterizer"]
+svg-renderer = ["dep:resvg"]
 image-decoder = ["dep:image"]
 kitty-encoder = ["dep:little-kitty"]
 sixel-encoder = ["dep:icy_sixel"]
@@ -67,6 +68,7 @@ icy_sixel = { version = "0.5", optional = true }
 # using a bundled Fira Mono font. Without the feature, the
 # placeholder solid-block render is preserved.
 fontdue = { version = "0.9", optional = true }
+resvg = { version = "0.44", optional = true }
 
 [dev-dependencies]
 # Criterion is the de-facto Rust benchmarking framework (BSD

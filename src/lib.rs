@@ -87,6 +87,8 @@ pub use framebuffer::{blend_over, FrameBuffer};
 pub use geometry::{Rect, Transform};
 #[cfg(feature = "image-decoder")]
 pub use layer::ImageLayer;
+#[cfg(feature = "svg-renderer")]
+pub use layer::SVGLayer;
 #[cfg(feature = "font-rasterizer")]
 pub use layer::FontSource;
 pub use layer::{BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, ShadowLayer, SolidColor, TextLayer};

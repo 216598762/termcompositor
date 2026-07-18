@@ -1784,6 +1784,180 @@ impl Layer for GradientLayer {
 /// name when the wrapper is used for shadow/glow effects.
 pub type ShadowLayer = DropShadow;
 
+/// An SVG rendering layer that rasterises SVG content into the framebuffer.
+///
+/// `SVGLayer` uses the `resvg` crate to parse and render SVG data (from
+/// a string, file path, or bytes) into a pixel buffer, then composites
+/// it into the target framebuffer with per-pixel alpha blending.
+///
+/// Only available when the `svg-renderer` Cargo feature is enabled.
+///
+/// # Example
+///
+/// ```ignore
+/// use termcompositor::SVGLayer;
+///
+/// let svg = SVGLayer::from_str(
+///     r#"<svg width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>"#,
+///     0, 0,
+/// ).unwrap();
+/// ```
+#[cfg(feature = "svg-renderer")]
+pub struct SVGLayer {
+    /// Left edge, inclusive.
+    pub x: u32,
+    /// Top edge, inclusive.
+    pub y: u32,
+    pixels: Vec<[u8; 4]>,
+    width: u32,
+    height: u32,
+    z: u32,
+    name: String,
+}
+
+#[cfg(feature = "svg-renderer")]
+impl SVGLayer {
+    /// Parses and renders SVG data from a string at position `(x, y)`.
+    ///
+    /// The SVG is rendered at its intrinsic size (width/height attributes
+    /// or viewBox). Returns an error if the SVG cannot be parsed or
+    /// rendered.
+    pub fn from_str(svg_data: &str, x: u32, y: u32) -> Result<Self, String> {
+        let rtree = resvg::usvg::Tree::from_str(svg_data, &resvg::usvg::Options::default())
+            .map_err(|e| format!("usvg parse error: {e}"))?;
+        Self::from_tree(&rtree, x, y)
+    }
+
+    /// Parses and renders SVG data from bytes at position `(x, y)`.
+    pub fn from_bytes(svg_data: &[u8], x: u32, y: u32) -> Result<Self, String> {
+        let rtree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
+            .map_err(|e| format!("usvg parse error: {e}"))?;
+        Self::from_tree(&rtree, x, y)
+    }
+
+    /// Renders an already-parsed `usvg::Tree` at position `(x, y)`.
+    fn from_tree(tree: &resvg::usvg::Tree, x: u32, y: u32) -> Result<Self, String> {
+        let size = tree.size();
+        let w = size.width() as u32;
+        let h = size.height() as u32;
+        if w == 0 || h == 0 {
+            return Err("SVG has zero dimensions".to_owned());
+        }
+
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)
+            .ok_or_else(|| "failed to create pixmap".to_owned())?;
+        let mut pm = pixmap.as_mut();
+        resvg::render(
+            tree,
+            resvg::tiny_skia::Transform::default(),
+            &mut pm,
+        );
+
+        // Convert premultiplied RGBA pixels to straight RGBA.
+        // tiny-skia returns premultiplied alpha; we must demultiply
+        // to get correct colours for semi-transparent pixels.
+        let raw = pixmap.data();
+        let pixels: Vec<[u8; 4]> = raw
+            .chunks_exact(4)
+            .map(|c| {
+                let a = c[3] as f32 / 255.0;
+                if a == 0.0 {
+                    [0, 0, 0, 0]
+                } else {
+                    [
+                        (c[0] as f32 / a).min(255.0) as u8,
+                        (c[1] as f32 / a).min(255.0) as u8,
+                        (c[2] as f32 / a).min(255.0) as u8,
+                        c[3],
+                    ]
+                }
+            })
+            .collect();
+
+        Ok(Self {
+            x,
+            y,
+            pixels,
+            width: w,
+            height: h,
+            z: 0,
+            name: format!("SVG({w}x{h})"),
+        })
+    }
+
+    /// SVG width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// SVG height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Builder: sets the default z-order.
+    #[must_use]
+    pub fn with_z(mut self, z: u32) -> Self {
+        self.z = z;
+        self
+    }
+
+    /// Builder: sets a human-readable name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+}
+
+#[cfg(feature = "svg-renderer")]
+impl std::fmt::Debug for SVGLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SVGLayer")
+            .field("x", &self.x)
+            .field("y", &self.y)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("z", &self.z)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+#[cfg(feature = "svg-renderer")]
+impl Layer for SVGLayer {
+    fn z_order(&self) -> u32 {
+        self.z
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn bounds(&self) -> Option<Rect> {
+        Some(Rect::new(self.x, self.y, self.width, self.height))
+    }
+
+    fn render(&self, target: &mut FrameBuffer, offset: (u32, u32), opacity: f32) {
+        let ox = self.x.saturating_add(offset.0);
+        let oy = self.y.saturating_add(offset.1);
+        for sy in 0..self.height {
+            for sx in 0..self.width {
+                let src = self.pixels[(sy as usize) * (self.width as usize) + (sx as usize)];
+                if src[3] == 0 {
+                    continue;
+                }
+                let tx = ox + sx;
+                let ty = oy + sy;
+                let src_alpha = f32::from(src[3]) / 255.0 * opacity;
+                if let Some(px) = target.get_pixel_mut(tx, ty) {
+                    crate::framebuffer::blend_over(px, &src, src_alpha);
+                }
+            }
+        }
+    }
+}
+
 /// Describes the clipping region for a [`ClipLayer`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClipRegion {
@@ -4113,6 +4287,80 @@ mod font_rasterizer_extra {
         t.render(&mut fb, (0, 0), 1.0);
         let any_nonzero = fb.pixels().iter().any(|p| p[3] > 0);
         assert!(!any_nonzero, "empty text render should not change framebuffer");
+    }
+
+    // ─── SVGLayer tests ──────────────────────────────────────
+
+    #[cfg(feature = "svg-renderer")]
+    mod svg_tests {
+        use super::*;
+        use crate::SVGLayer;
+
+        const SVG_RECT_10: &str =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>"#;
+        const SVG_CIRCLE_5: &str =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><circle cx="2.5" cy="2.5" r="2" fill="blue"/></svg>"#;
+        const SVG_RECT_5: &str =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><rect width="5" height="5" fill="green"/></svg>"#;
+        const SVG_RECT_20X15: &str =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="15"><rect width="20" height="15" fill="red"/></svg>"#;
+
+        #[test]
+        fn svg_layer_from_str_renders_rect() {
+            let svg = SVGLayer::from_str(SVG_RECT_10, 0, 0)
+                .expect("should parse SVG");
+
+            assert_eq!(svg.width(), 10);
+            assert_eq!(svg.height(), 10);
+
+            let mut fb = FrameBuffer::new(10, 10);
+            svg.render(&mut fb, (0, 0), 1.0);
+
+            let center = fb.get_pixel(5, 5).unwrap();
+            assert!(center[0] > 200, "red channel should be high, got {}", center[0]);
+            assert!(center[3] > 0, "alpha should be non-zero");
+        }
+
+        #[test]
+        fn svg_layer_from_bytes_works() {
+            let svg = SVGLayer::from_bytes(SVG_CIRCLE_5.as_bytes(), 0, 0)
+                .expect("should parse SVG from bytes");
+            assert_eq!(svg.width(), 5);
+            assert_eq!(svg.height(), 5);
+        }
+
+        #[test]
+        fn svg_layer_invalid_svg_returns_error() {
+            let result = SVGLayer::from_str("not valid svg", 0, 0);
+            assert!(result.is_err(), "invalid SVG should return error");
+        }
+
+        #[test]
+        fn svg_layer_with_position() {
+            let svg = SVGLayer::from_str(SVG_RECT_5, 10, 10)
+                .expect("should parse SVG");
+
+            let mut fb = FrameBuffer::new(20, 20);
+            svg.render(&mut fb, (0, 0), 1.0);
+
+            // Pixel at (10,10) should have non-zero alpha.
+            let px = fb.get_pixel(10, 10).unwrap();
+            assert!(px[3] > 0, "alpha should be non-zero at (10,10)");
+            // Pixel at (0,0) should be transparent.
+            assert_eq!(fb.get_pixel(0, 0), Some(&[0, 0, 0, 0]));
+        }
+
+        #[test]
+        fn svg_layer_bounds() {
+            let svg = SVGLayer::from_str(SVG_RECT_20X15, 5, 5)
+                .expect("should parse SVG");
+
+            let bounds = svg.bounds().unwrap();
+            assert_eq!(bounds.x, 5);
+            assert_eq!(bounds.y, 5);
+            assert_eq!(bounds.width, 20);
+            assert_eq!(bounds.height, 15);
+        }
     }
 
     // ─── ClipLayer tests ───────────────────────────────────────
