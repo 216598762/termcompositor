@@ -15,6 +15,7 @@ This guide covers how to use `termcompositor` as a library and as a CLI tool.
 - [Layer clipping](#layer-clipping)
 - [Rounded corners](#rounded-corners)
 - [Shadow and glow effects](#shadow-and-glow-effects)
+- [Accessibility metadata](#accessibility-metadata)
 - [CLI usage](#cli-usage)
 - [Feature flags](#feature-flags)
 - [Protocol auto-detection](#protocol-auto-detection)
@@ -712,6 +713,70 @@ let glow = DropShadow::new(Box::new(inner))
 | `.with_glow(color, blur)` | Convenience: bright colour + zero offset + blur. |
 
 `ShadowLayer` is a type alias for `DropShadow`.
+
+---
+
+
+---
+
+## Accessibility metadata
+
+Layers can carry accessibility metadata (alt-text and a semantic role)
+for screen readers, headless terminals, and other assistive
+technologies.
+
+### Quick start
+
+```rust
+use termcompositor::{AccessibilityMetadata, SemanticRole, LayerEntry, RectLayer};
+
+let rect = RectLayer::new(0, 0, 10, 5, [255, 0, 0, 255]);
+let entry = LayerEntry::new(0, Box::new(rect))
+    .with_accessibility(
+        AccessibilityMetadata::new()
+            .with_alt_text("Status indicator")
+            .with_role(SemanticRole::Status)
+    );
+
+assert_eq!(entry.accessibility().unwrap().alt_text(), Some("Status indicator"));
+assert_eq!(entry.accessibility().unwrap().role(), SemanticRole::Status);
+```
+
+### SemanticRole
+
+| Role | Description |
+|---|---|
+| `None` | No specific role; the layer is decorative (default). |
+| `Text` | A text label or heading. |
+| `Button` | A button or interactive element. |
+| `Image` | An image or icon. |
+| `Container` | A container grouping child layers. |
+| `Separator` | A separator or divider. |
+| `Status` | A progress indicator or status display. |
+| `Navigation` | A navigation element. |
+| `Custom(&str)` | A custom role with a static string label. |
+
+### API reference
+
+| Method | Description |
+|---|---|
+| `AccessibilityMetadata::new()` | Create empty metadata (no alt-text, `SemanticRole::None`). |
+| `.with_alt_text(text)` | Builder: set the alt-text. |
+| `.with_role(role)` | Builder: set the semantic role. |
+| `entry.accessibility()` | Returns `Option<&AccessibilityMetadata>`. |
+| `entry.accessibility_mut()` | Returns `&mut AccessibilityMetadata` (creates default if none). |
+| `entry.set_accessibility(Some(meta))` | Set or clear the metadata. |
+| `entry.with_accessibility(meta)` | Builder on `LayerEntry`. |
+
+### Notes
+
+- `accessibility()` returns `None` when no metadata is set.
+- `accessibility_mut()` always returns a mutable reference — if
+  none exists, a default (`alt_text: None`, `role: None`) is
+  created automatically.
+- `SemanticRole::Custom` uses `&'static str` to avoid runtime
+  allocation; for dynamic roles, store the string in a
+  `Box::leak` or `OnceLock`.
 
 ---
 

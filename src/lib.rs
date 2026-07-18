@@ -91,7 +91,7 @@ pub use layer::ImageLayer;
 pub use layer::SVGLayer;
 #[cfg(feature = "font-rasterizer")]
 pub use layer::FontSource;
-pub use layer::{BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, ShadowLayer, SolidColor, TextLayer};
+pub use layer::{AccessibilityMetadata, BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SemanticRole, ShadowLayer, SolidColor, TextLayer};
 pub use terminal::TerminalSize;
 
 // Re-export animation module at crate root for convenience.

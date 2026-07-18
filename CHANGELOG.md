@@ -1,3 +1,30 @@
+## 1.0.0 (2026-07-18)
+
+The v1.0.0 milestone release completes the ROADMAP with accessibility
+metadata for screen readers and a new FrameBuffer helper.
+
+### Added
+
+- **Accessibility Metadata** (`src/layer.rs`): attach alt-text and
+  semantic roles to layers for screen readers and headless terminals.
+  - `SemanticRole` enum: `None`, `Text`, `Button`, `Image`,
+    `Container`, `Separator`, `Status`, `Navigation`,
+    `Custom(&'static str)`.
+  - `AccessibilityMetadata` struct: `alt_text: Option<String>`
+    and `role: SemanticRole` fields with builder pattern.
+  - `LayerEntry` gains `accessibility()`, `accessibility_mut()`,
+    `set_accessibility()`, and `with_accessibility()` methods.
+  - `AccessibilityMetadata` and `SemanticRole` re-exported from
+    the crate root.
+  - 9 unit tests covering defaults, builder, setters, and
+    LayerEntry integration.
+
+- **`FrameBuffer::fill_rect(rx, ry, rw, rh, color)`**
+  (`src/framebuffer.rs`): fills a rectangular region with a
+  solid RGBA colour. Silently clips to framebuffer bounds;
+  coordinates outside the buffer are ignored. Uses direct
+  slice writes for performance. 4 unit tests.
+
 ## [Unreleased]
 
 ### Added
