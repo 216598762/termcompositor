@@ -446,6 +446,11 @@ pub struct TextLayer {
     /// bundled font is known-good and will never fail.
     #[cfg(feature = "font-rasterizer")]
     font: std::sync::OnceLock<fontdue::Font>,
+    /// Lazily loaded font data (owned). Only used when
+    /// `FontSource::Path` is selected; avoids leaking the
+    /// font bytes via `Box::leak`.
+    #[cfg(feature = "font-rasterizer")]
+    font_data: std::sync::OnceLock<Vec<u8>>,
 }
 
 impl TextLayer {
@@ -469,6 +474,8 @@ impl TextLayer {
             font_source: FontSource::Bundled,
             #[cfg(feature = "font-rasterizer")]
             font: std::sync::OnceLock::new(),
+            #[cfg(feature = "font-rasterizer")]
+            font_data: std::sync::OnceLock::new(),
         }
     }
 
@@ -591,17 +598,15 @@ impl TextLayer {
     #[cfg(feature = "font-rasterizer")]
     fn ensure_font(&self) -> &fontdue::Font {
         self.font.get_or_init(|| {
+            // First, ensure the font data bytes are loaded into
+            // `font_data`. This avoids `Box::leak` for `FontSource::Path`.
             let bytes: &[u8] = match &self.font_source {
                 FontSource::Bundled => BUNDLED_FONT_DATA,
                 FontSource::Path(path) => {
-                    // Reading on first render; the caller is
-                    // responsible for ensuring the font file
-                    // is accessible.
-                    let data = std::fs::read(path)
-                        .expect("font-rasterizer: failed to read font file");
-                    // Leak the data so the reference lives long enough.
-                    // This only happens once per TextLayer (on first render).
-                    Box::leak(data.into_boxed_slice())
+                    self.font_data.get_or_init(|| {
+                        std::fs::read(path)
+                            .expect("font-rasterizer: failed to read font file")
+                    })
                 }
                 FontSource::Bytes(b) => b,
             };
@@ -2867,6 +2872,20 @@ fn gradient_zero_length_line() {
             &[255, 255, 255, 255],
             "zero-length gradient should render start_color"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "linear_points() called on a radial builder")]
+    fn gradient_builder_linear_points_on_radial_panics() {
+        let _ = GradientLayerBuilder::new_radial()
+            .linear_points(0, 0, 10, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "radial_params() called on a linear builder")]
+    fn gradient_builder_radial_params_on_linear_panics() {
+        let _ = GradientLayerBuilder::new_linear()
+            .radial_params(0, 0, 10);
     }
 
 // ─── SceneGraph tests ──────────────────────────────────────

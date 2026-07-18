@@ -93,8 +93,8 @@ pub use layer::ImageLayer;
 pub use layer::SVGLayer;
 pub use layer::{
     AccessibilityMetadata, BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow,
-    GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SceneGraph, SemanticRole,
-    ShadowLayer, SolidColor, TextAlignment, TextLayer,
+    GradientKind, GradientLayer, GradientLayerBuilder, Layer, LayerEntry, LayerId,
+    RectLayer, SceneGraph, SemanticRole, ShadowLayer, SolidColor, TextAlignment, TextLayer,
 };
 pub use terminal::TerminalSize;
 
