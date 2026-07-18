@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Added
+
+- **Diff-Based Rendering** (`src/compositor.rs`): track rectangular dirty regions to skip re-compositing unchanged areas.
+  - `DirtyRect` struct: tracks rectangular dirty areas with `x`, `y`, `width`, `height`.
+  - `DirtyRegion` tracker: accumulates dirty rects via `mark_rect()`, `mark_full()`, `mark_point()`; resets via `take_regions()`.
+  - `LayerStack::render_diff(target, dirty)`: renders to a temporary buffer and copies only dirty regions to the target framebuffer.
+  - 8 unit tests covering dirty region tracking and diff rendering.
+  - Integrated into the animation loop: `AnimContext` now has a `dirty: DirtyRegion` field, `mark_full()` and `mark_rect()` methods, and `request_redraw()` automatically marks the entire framebuffer as dirty.
+
+- **`LayerStack::find_by_name()` / `find_by_name_mut()`** (`src/compositor.rs`): look up layers by name for convenient runtime modification.
+  - `find_by_name(name) -> Option<&LayerEntry>`: returns a reference to the first entry whose name matches.
+  - `find_by_name_mut(name) -> Option<&mut LayerEntry>`: mutable variant.
+  - 4 unit tests covering lookup, modification, and duplicate-name handling.
+
 ## 0.15.0 (2026-07-18)
 
 The third development release adds three visual features to the layer system:

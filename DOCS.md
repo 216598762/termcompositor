@@ -10,6 +10,8 @@ This guide covers how to use `termcompositor` as a library and as a CLI tool.
 - [Library usage](#library-usage)
 - [Animation loop](#animation-loop)
 - [Layer transforms](#layer-transforms)
+- [Diff-based rendering](#diff-based-rendering)
+- [Layer lookup by name](#layer-lookup-by-name)
 - [Layer clipping](#layer-clipping)
 - [Rounded corners](#rounded-corners)
 - [Shadow and glow effects](#shadow-and-glow-effects)
@@ -404,6 +406,189 @@ let (lx, ly) = t.apply_inverse(tx, ty);
 assert!((lx - 10.0).abs() < 1e-5);
 assert!((ly - 0.0).abs() < 1e-5);
 ```
+
+---
+
+## Diff-based rendering
+
+`LayerStack` supports diff-based rendering via the `render_diff()` method
+and the `DirtyRegion` tracker. This allows you to mark specific regions
+as dirty and only re-copy those regions to the framebuffer, reducing
+memory bandwidth and improving performance in animation loops.
+
+### Quick start
+
+```rust
+use termcompositor::{DirtyRegion, DirtyRect, FrameBuffer, LayerStack, RectLayer};
+
+let mut stack = LayerStack::new();
+stack.push(RectLayer::new(0, 0, 50, 50, [255, 0, 0, 255]));
+
+let mut fb = FrameBuffer::new(100, 100);
+let mut dirty = DirtyRegion::new();
+
+// First render: mark everything as dirty.
+dirty.mark_full();
+stack.render_diff(&mut fb, &mut dirty);
+
+// Later: mark only a specific region as dirty.
+dirty.mark_rect(DirtyRect::new(10, 10, 20, 20));
+stack.render_diff(&mut fb, &mut dirty);
+```
+
+### DirtyRegion
+
+The `DirtyRegion` struct tracks rectangular dirty areas across frames:
+
+| Method | Description |
+|---|---|
+| `DirtyRegion::new()` | Create an empty tracker (clean state). |
+| `mark_full()` | Mark the entire framebuffer as dirty (full re-render). |
+| `mark_rect(rect)` | Mark a specific rectangular region as dirty. |
+| `mark_point(x, y)` | Mark a single pixel as dirty. |
+| `is_clean()` | Returns `true` if no regions are marked dirty. |
+| `take_regions()` | Consume and return the list of dirty regions (drains the tracker). |
+| `region_count()` | Number of tracked dirty regions. |
+
+### DirtyRect
+
+A simple rectangle for specifying dirty regions:
+
+```rust
+use termcompositor::DirtyRect;
+
+let rect = DirtyRect::new(x, y, width, height);
+```
+
+### Integration with animation loop
+
+The `AnimContext` in the animation loop has built-in dirty region tracking:
+
+| Method | Description |
+|---|---|
+| `mark_full()` | Mark entire framebuffer dirty (triggers full re-render). |
+| `mark_rect(rect)` | Mark a specific region dirty. |
+| `request_redraw()` | Set redraw flag AND mark full dirty. |
+
+```rust,no_run
+use termcompositor::animation::{self, AnimContext};
+use termcompositor::{DirtyRect, LayerStack, RectLayer};
+
+fn main() {
+    let mut stack = LayerStack::new();
+    let bar = stack.push(
+        RectLayer::new(0, 0, 20, 5, [0, 200, 0, 255]).with_z(10)
+    );
+
+    animation::run_with_stack(stack, 30.0, move |ctx| {
+        // Move the bar and mark only its old/new position as dirty.
+        if let Some(entry) = ctx.layers_mut().get_mut(bar) {
+            let old_x = entry.layer().bounds().map(|b| b.x).unwrap_or(0);
+            // Update position...
+            let new_x = old_x + 1;
+            ctx.mark_rect(DirtyRect::new(old_x, 0, 20, 5));
+            ctx.mark_rect(DirtyRect::new(new_x, 0, 20, 5));
+        }
+    });
+}
+```
+
+### Using outside the animation loop
+
+`DirtyRegion` is not tied to the animation module — you can use it in any
+rendering context, such as a manual render loop, a game loop, or a
+custom compositor:
+
+```rust
+use termcompositor::{DirtyRegion, DirtyRect, FrameBuffer, LayerStack, RectLayer};
+
+let mut stack = LayerStack::new();
+stack.push(RectLayer::new(0, 0, 50, 50, [255, 0, 0, 255]));
+
+let mut fb = FrameBuffer::new(100, 100);
+let mut dirty = DirtyRegion::new();
+
+// First render: mark everything dirty.
+dirty.mark_full();
+stack.render_diff(&mut fb, &mut dirty);
+
+// Simulate a layer moving from (10,10) to (20,20).
+// Mark both the old and new positions as dirty.
+dirty.mark_rect(DirtyRect::new(10, 10, 50, 50));
+stack.render_diff(&mut fb, &mut dirty);
+
+// Simulate a small update: only a 10x10 region changed.
+dirty.mark_rect(DirtyRect::new(30, 30, 10, 10));
+stack.render_diff(&mut fb, &mut dirty);
+
+// Force a full re-render.
+dirty.mark_full();
+stack.render_diff(&mut fb, &mut dirty);
+```
+
+This pattern is useful when:
+- You have your own frame loop (e.g., a game engine, GUI toolkit).
+- You want to optimize static frames where only some layers change.
+- You are doing one-shot rendering with incremental updates.
+
+### How it works
+
+1. `render_diff()` checks if `dirty` is clean — if so, does nothing.
+2. If dirty, composites all layers into a temporary buffer.
+3. Copies only the dirty regions from the temp buffer to `target`.
+4. Consumes (drains) the dirty regions after copying.
+
+Note: The full composition still runs every frame — the optimization
+is at the copy stage, not the composition stage. This reduces memory
+bandwidth when only small regions change.
+
+### Performance characteristics
+
+- **Memory**: O(W×H) for the temporary buffer (same as `render()`).
+- **Copy**: O(D) where D = area of dirty regions (typically << W×H).
+- **Composition**: O(W×H×N) where N = number of layers (same as `render()`).
+
+The best-case improvement comes when `D << W×H` — e.g., animating a
+small rectangle on a large background.
+
+---
+
+## Layer lookup by name
+
+`LayerStack` provides named lookup methods to find layers by their name
+without knowing the `LayerId`:
+
+```rust
+use termcompositor::{LayerStack, RectLayer, SolidColor};
+
+let mut stack = LayerStack::new();
+stack.push(SolidColor::new(0, 0, 64, 255).with_name("bg"));
+stack.push(RectLayer::new(10, 5, 20, 10, [255, 0, 0, 255]).with_name("rect"));
+
+// Find by name (returns first match).
+let entry = stack.find_by_name("rect").expect("should find rect");
+assert_eq!(entry.layer().bounds().unwrap().x, 10);
+
+// Find and modify.
+if let Some(entry) = stack.find_by_name_mut("bg") {
+    entry.set_opacity(0.5);
+}
+```
+
+### API reference
+
+| Method | Description |
+|---|---|
+| `find_by_name(name)` | Returns `Option<&LayerEntry>` for the first entry whose name matches. |
+| `find_by_name_mut(name)` | Returns `Option<&mut LayerEntry>` for the first matching entry. |
+
+### Notes
+
+- Names are set via `.with_name("name")` on any layer before pushing.
+- Only the **first** matching entry is returned (if duplicates exist).
+- Returns `None` if no entry has the given name.
+- Lookup is O(n) linear scan — suitable for small stacks; use `LayerId`
+  for O(1) access in performance-critical code.
 
 ---
 

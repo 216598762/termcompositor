@@ -61,7 +61,7 @@ pub mod geometry;
 pub mod layer;
 pub mod terminal;
 
-pub use compositor::{Compositor, CpuCompositor, LayerStack};
+pub use compositor::{Compositor, CpuCompositor, DirtyRect, DirtyRegion, LayerStack};
 #[cfg(feature = "kitty-encoder")]
 pub use encoder::detect_with_probe;
 #[cfg(feature = "kitty-encoder")]
