@@ -278,6 +278,19 @@ impl LayerStack {
         self.entries.iter().position(|e| e.id() == id)
     }
 
+    /// Returns a reference to the first entry whose name matches
+    /// `name`. If multiple entries share the same name, the first
+    /// one (earliest push order) is returned.
+    pub fn find_by_name(&self, name: &str) -> Option<&LayerEntry> {
+        self.entries.iter().find(|e| e.name() == name)
+    }
+
+    /// Returns a mutable reference to the first entry whose name
+    /// matches `name`.
+    pub fn find_by_name_mut(&mut self, name: &str) -> Option<&mut LayerEntry> {
+        self.entries.iter_mut().find(|e| e.name() == name)
+    }
+
     /// Moves the entry with the given `id` to `new_index` in the
     /// underlying `Vec`. The relative order of other entries is
     /// preserved. No-op if the id is missing.
@@ -749,5 +762,41 @@ mod tests {
 
         assert_ne!(fb_no_t.pixels(), fb_t.pixels(),
             "rotated rect should render differently from unrotated");
+    }
+
+    #[test]
+    fn find_by_name_returns_matching_entry() {
+        let mut s = LayerStack::new();
+        s.push(SolidColor::new(255, 0, 0, 255).with_name("bg"));
+        s.push(RectLayer::new(10, 10, 5, 5, [0, 255, 0, 255]).with_name("rect"));
+
+        let entry = s.find_by_name("rect").expect("should find rect");
+        assert_eq!(entry.name(), "rect");
+    }
+
+    #[test]
+    fn find_by_name_returns_none_when_not_found() {
+        let s = LayerStack::new();
+        assert!(s.find_by_name("nonexistent").is_none());
+    }
+
+    #[test]
+    fn find_by_name_mut_allows_modification() {
+        let mut s = LayerStack::new();
+        s.push(RectLayer::new(0, 0, 10, 10, [255, 0, 0, 255]).with_name("target"));
+
+        s.find_by_name_mut("target").unwrap().set_opacity(0.5);
+        assert_eq!(s.find_by_name("target").unwrap().opacity(), 0.5);
+    }
+
+    #[test]
+    fn find_by_name_returns_first_match() {
+        let mut s = LayerStack::new();
+        s.push(SolidColor::new(255, 0, 0, 255).with_name("dup"));
+        s.push(SolidColor::new(0, 255, 0, 255).with_name("dup"));
+
+        let entry = s.find_by_name("dup").unwrap();
+        // First pushed entry (red) should be returned.
+        assert_eq!(entry.name(), "dup");
     }
 }
