@@ -1679,6 +1679,7 @@ pub enum GradientKind {
 
 impl GradientLayer {
     /// Creates a new linear gradient layer.
+    // TODO(v2.0): refactor to builder pattern to reduce argument count
     #[allow(clippy::too_many_arguments)]
     pub fn linear(
         x: u32,
@@ -1711,6 +1712,7 @@ impl GradientLayer {
     }
 
     /// Creates a new radial gradient layer.
+    // TODO(v2.0): refactor to builder pattern to reduce argument count
     #[allow(clippy::too_many_arguments)]
     pub fn radial(
         x: u32,

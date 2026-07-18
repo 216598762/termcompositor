@@ -141,6 +141,7 @@ impl Compositor for CpuCompositor {
 /// Applies a transform to a source framebuffer and composites the
 /// result onto the target within the given bounding box
 /// `[tx_min, ty_min) .. (tx_max, ty_max)`. Uses inverse mapping:
+// TODO(v2.0): refactor to accept a config struct to reduce argument count
 #[allow(clippy::too_many_arguments)]
 /// for each target pixel, computes the corresponding source
 /// coordinate via the inverse transform, samples with bilinear
