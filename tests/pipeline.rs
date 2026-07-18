@@ -10,11 +10,6 @@
 //! - `wrap_for_tmux()` / `wrap_for_tmux_to_writer()`
 //! - `encode_passthrough_to_writer()`
 
-use termcompositor::{
-    dispatch_to_writer, detect, BorderLayer, CanvasLayer, DropShadow,
-    FrameBuffer, GradientLayer, Layer, LayerStack, Protocol, ProtocolEncoder,
-    RectLayer, SceneGraph, SolidColor, TextLayer,
-};
 
 #[allow(unused_imports)]
 use std::io::Write;

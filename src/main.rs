@@ -559,7 +559,7 @@ mod tests {
     /// execution race conditions (env vars are process-global state).
     #[test]
     fn guard_all_env_var_scenarios() {
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
+        std::env::remove_var("TMUXPASSTHROUGH");
 
         // --- Test 1: set(Some) when absent sets var, drop removes it ---
         {
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "original");
 
         // --- Test 5: set(None) when absent leaves absent ---
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
+        std::env::remove_var("TMUXPASSTHROUGH");
         {
             let _guard = TmuxPassthroughGuard::set(None);
             assert!(std::env::var("TMUXPASSTHROUGH").is_err());
@@ -606,6 +606,6 @@ mod tests {
         assert!(std::env::var("TMUXPASSTHROUGH").is_err());
 
         // Cleanup
-        let _ = std::env::remove_var("TMUXPASSTHROUGH");
+        std::env::remove_var("TMUXPASSTHROUGH");
     }
 }

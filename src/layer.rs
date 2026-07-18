@@ -32,8 +32,10 @@ pub type LayerId = usize;
 /// and accessibility tools to convey the content's meaning without
 /// rendering the visual output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum SemanticRole {
     /// No specific role; the layer is decorative.
+    #[default]
     None,
     /// A text label or heading.
     Text,
@@ -53,11 +55,6 @@ pub enum SemanticRole {
     Custom(&'static str),
 }
 
-impl Default for SemanticRole {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Accessibility metadata for a layer.
 ///
@@ -372,8 +369,10 @@ impl Layer for RectLayer {
 /// line for `Left`, the centre of each line for `Center`, and
 /// the end of each line for `Right`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum TextAlignment {
     /// Left-aligned (default). Each line starts at `x`.
+    #[default]
     Left,
     /// Centred. Each line is horizontally centred on `x`.
     Center,
@@ -381,11 +380,6 @@ pub enum TextAlignment {
     Right,
 }
 
-impl Default for TextAlignment {
-    fn default() -> Self {
-        Self::Left
-    }
-}
 
 /// Source of font data for text rendering.
 ///
@@ -1669,15 +1663,22 @@ pub struct GradientLayer {
 pub enum GradientKind {
     /// Linear gradient from `(start_x, start_y)` to `(end_x, end_y)`.
     Linear {
+        /// Start X coordinate in pixels.
         start_x: u32,
+        /// Start Y coordinate in pixels.
         start_y: u32,
+        /// End X coordinate in pixels.
         end_x: u32,
+        /// End Y coordinate in pixels.
         end_y: u32,
     },
     /// Radial gradient from `center_x, center_y` outward to `radius`.
     Radial {
+        /// Center X coordinate in pixels.
         center_x: u32,
+        /// Center Y coordinate in pixels.
         center_y: u32,
+        /// Gradient radius in pixels.
         radius: u32,
     },
 }
@@ -2260,7 +2261,7 @@ mod tests {
         t.render(&mut fb, (0, 0), 1.0);
         // Right-aligned: text should end at x=15, so pixels
         // should be at x < 15.
-        let any_pixel_15plus = (15..20).any(|x| fb.get_pixel(x, 0).map_or(false, |p| p[3] > 0));
+        let any_pixel_15plus = (15..20).any(|x| fb.get_pixel(x, 0).is_some_and(|p| p[3] > 0));
         assert!(!any_pixel_15plus, "right-aligned text should not render past x=15");
     }
 
@@ -2339,7 +2340,7 @@ mod tests {
         let mut fb = FrameBuffer::new(20, 20);
         ds.render(&mut fb, (0, 0), 1.0);
         // Should not panic; some pixels should be non-transparent.
-        let any_pixel = fb.get_pixel(0, 0).map_or(false, |p| p[3] > 0);
+        let any_pixel = fb.get_pixel(0, 0).is_some_and(|p| p[3] > 0);
         assert!(any_pixel, "drop shadow should render some pixels");
     }
 
@@ -2361,7 +2362,7 @@ mod tests {
         let mut fb = FrameBuffer::new(30, 30);
         ds.render(&mut fb, (0, 0), 1.0);
         // Negative spread should still render without panic.
-        let any_pixel = fb.get_pixel(0, 0).map_or(false, |p| p[3] > 0);
+        let any_pixel = fb.get_pixel(0, 0).is_some_and(|p| p[3] > 0);
         assert!(any_pixel, "negative spread should still render");
     }
 
@@ -2500,7 +2501,7 @@ mod tests {
         let g = GradientLayer::linear(0, 0, 5, 5, [255, 0, 0, 255], [0, 0, 255, 255], 0, 0, 5, 5);
         let mut fb = FrameBuffer::new(10, 10);
         g.render(&mut fb, (0, 0), 1.0);
-        let any_pixel = fb.get_pixel(0, 0).map_or(false, |p| p[3] > 0);
+        let any_pixel = fb.get_pixel(0, 0).is_some_and(|p| p[3] > 0);
         assert!(any_pixel, "linear gradient should render pixels");
     }
 
@@ -2510,7 +2511,7 @@ mod tests {
         let mut fb = FrameBuffer::new(15, 15);
         g.render(&mut fb, (0, 0), 1.0);
         // Check pixel near the center of the gradient (5,5) where alpha should be non-zero
-        let center_pixel = fb.get_pixel(5, 5).map_or(false, |p| p[3] > 0);
+        let center_pixel = fb.get_pixel(5, 5).is_some_and(|p| p[3] > 0);
         assert!(center_pixel, "radial gradient center should have non-zero alpha");
     }
 
@@ -2615,7 +2616,7 @@ mod tests {
         let mut fb = FrameBuffer::new(20, 20);
         r.render(&mut fb, (0, 0), 1.0);
         // Check pixel inside the rect (5,5) - should be non-transparent
-        let any_pixel = fb.get_pixel(5, 5).map_or(false, |p| p[3] > 0);
+        let any_pixel = fb.get_pixel(5, 5).is_some_and(|p| p[3] > 0);
         assert!(any_pixel, "rounded rect should render center pixel");
     }
 

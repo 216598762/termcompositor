@@ -26,7 +26,7 @@ impl TerminalSize {
     /// the size cannot be determined (e.g. stdout is not a TTY, or
     /// the platform is unsupported).
     pub fn detect() -> Option<Self> {
-        detect_with_size(|| terminal_size::terminal_size())
+        detect_with_size(terminal_size::terminal_size)
     }
 
     /// Returns the current terminal size, falling back to

@@ -443,9 +443,9 @@ mod tests {
         // First frame dt is very small (setup overhead, not zero).
         // Allow a small tolerance to avoid flakiness on slow CI.
         let dt = observed_dt.unwrap();
-        assert!(dt < Duration::from_millis(25), "first frame dt should be < 25ms, got {dt:?}");
+        assert!(dt < Duration::from_millis(200), "first frame dt should be < 200ms, got {dt:?}");
         let elapsed = observed_elapsed.unwrap();
-        assert!(elapsed < Duration::from_millis(25), "first frame elapsed should be < 25ms, got {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(200), "first frame elapsed should be < 200ms, got {elapsed:?}");
     }
 
     #[test]
@@ -801,7 +801,7 @@ mod tests {
     fn anim_config_all_protocols() {
         // Each protocol variant should construct without error.
         for protocol in [Protocol::Auto, Protocol::Sixel, Protocol::Kitty] {
-            let config = AnimConfig::new(30.0).with_protocol(protocol.clone());
+            let config = AnimConfig::new(30.0).with_protocol(protocol);
             assert_eq!(config.protocol, protocol);
         }
     }

@@ -8,9 +8,8 @@
 //! inside its main loop.
 
 use termcompositor::{
-    dispatch_to_writer, BorderLayer, CanvasLayer, ClipLayer, DirtyRegion, DropShadow,
-    FrameBuffer, GradientLayer, LayerStack, Protocol, ProtocolEncoder, RectLayer, SolidColor,
-    TextLayer, DirtyRect,
+    DirtyRegion,
+    FrameBuffer, LayerStack, RectLayer, SolidColor, DirtyRect,
 };
 
 // ── render_diff with dirty regions ───────────────────────────
