@@ -27,17 +27,6 @@ layer clipping/masking, rounded corners on rectangles, and shadow/glow effects.
   New `ShadowLayer` type alias for discoverability.
   6 new unit tests (spread + glow).
 
-### Fixed
-
-- `#[cfg(feature = "kitty-encoder")]` gate on 2 pre-existing encoder tests
-  that referenced `super::kitty` without the feature flag.
-
-- Removed incorrect `Ctrl+C` claim from `run()` doc comment and `DOCS.md`
-  animation loop section (no signal handling is implemented).
-
-- Fixed flaky `anim_context_delta_time_starts_at_zero` test by allowing
-  a < 1ms tolerance instead of requiring exact `Duration::ZERO`.
-
 ## 0.14.0 (2026-07-17)
 
 Animation loop and layer transforms. This release adds a built-in
