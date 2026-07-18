@@ -1794,6 +1794,7 @@ impl GradientLayer {
 ///     .build();
 /// ```
 #[must_use]
+#[derive(Debug)]
 pub struct GradientLayerBuilder {
     x: u32,
     y: u32,
@@ -2713,7 +2714,9 @@ fn gradient_linear_new() {
     assert_eq!(g.width, 10);
     assert_eq!(g.start_color, [255, 0, 0, 255]);
     assert_eq!(g.end_color, [0, 0, 255, 255]);
-}#[allow(deprecated)]
+}
+
+#[allow(deprecated)]
 #[test]
 fn gradient_radial_new() {
         let g = GradientLayer::radial(0, 0, 10, 10, [255; 4], [0; 4], 5, 5, 5);
@@ -2726,16 +2729,23 @@ fn gradient_radial_new() {
             center_y: 5,
             radius: 5
         }
-    );
-}#[allow(deprecated)]
-#[test]    // Intentionally tests the deprecated API for backwards compatibility.
+    );}
+
+#[allow(deprecated)]
+#[test]
+    // Intentionally tests the deprecated API for backwards compatibility.
     fn gradient_legacy_builder() {
         let g = GradientLayer::linear(0, 0, 10, 10, [255; 4], [0; 4], 0, 0, 10, 10)
         .with_z(5)
         .with_name("grad");
     assert_eq!(g.z_order(), 5);
     assert_eq!(g.name(), "grad");
-}#[allow(deprecated)]
+    assert_eq!(g.start_color, [255; 4]);
+    assert_eq!(g.end_color, [0; 4]);
+    assert!(matches!(g.kind, GradientKind::Linear { .. }));
+}
+
+#[allow(deprecated)]
 #[test]
 fn gradient_bounds() {
         let g = GradientLayer::linear(5, 10, 20, 15, [255; 4], [0; 4], 0, 0, 20, 15);
@@ -2748,7 +2758,9 @@ fn gradient_render_does_not_panic() {
     g.render(&mut fb, (0, 0), 1.0);
     let any_pixel = fb.get_pixel(0, 0).is_some_and(|p| p[3] > 0);
     assert!(any_pixel, "linear gradient should render pixels");
-}#[allow(deprecated)]
+}
+
+#[allow(deprecated)]
 #[test]
 fn gradient_radial_render_does_not_panic() {
         let g = GradientLayer::radial(0, 0, 10, 10, [255; 4], [0; 4], 5, 5, 5);
@@ -2760,7 +2772,9 @@ fn gradient_radial_render_does_not_panic() {
         center_pixel,
         "radial gradient center should have non-zero alpha"
     );
-}#[allow(deprecated)]
+}
+
+#[allow(deprecated)]
 #[test]
 fn gradient_zero_length_line() {
         let g = GradientLayer::linear(0, 0, 5, 5, [255; 4], [0; 4], 2, 2, 2, 2);
