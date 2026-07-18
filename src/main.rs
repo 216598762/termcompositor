@@ -35,10 +35,10 @@
 
 use std::io::Write;
 
+use termcompositor::animation::{self, AnimConfig};
 use termcompositor::{
     detect, LayerStack, Protocol, ProtocolEncoder, RectLayer, SolidColor, TerminalSize, TextLayer,
 };
-use termcompositor::animation::{self, AnimConfig};
 // `detect_with_probe` is only re-exported from `termcompositor`
 // when the `kitty-encoder` Cargo feature is enabled (because the
 // probe depends on `little_kitty`). Gate the import accordingly
@@ -134,7 +134,9 @@ impl Drop for TmuxPassthroughGuard {
 /// Build the demo layer stack with background, centered rect,
 /// and text label. Returns the stack and the IDs of the
 /// background and rect layers (for post-render mutations).
-fn build_demo_stack(size: TerminalSize) -> (LayerStack, termcompositor::LayerId, termcompositor::LayerId) {
+fn build_demo_stack(
+    size: TerminalSize,
+) -> (LayerStack, termcompositor::LayerId, termcompositor::LayerId) {
     let mut stack = LayerStack::new();
 
     // 1. Add a full-frame blue background at z=0.
@@ -249,13 +251,13 @@ using the env-var shim instead"
     // animation loop with a live demo. Ctrl+C to exit.
     if parse_animate_flag_from(&args) {
         let fps = parse_fps_flag_from(&args).unwrap_or(30.0);
-        eprintln!(
-            "entering animation mode at {fps:.0} FPS (Ctrl+C to exit)"
-        );
+        eprintln!("entering animation mode at {fps:.0} FPS (Ctrl+C to exit)");
 
         let mut stack = LayerStack::new();
         let _bg = stack.push(
-            SolidColor::new(0, 0, 64, 255).with_z(0).with_name("anim-bg"),
+            SolidColor::new(0, 0, 64, 255)
+                .with_z(0)
+                .with_name("anim-bg"),
         );
         let bar = stack.push(
             RectLayer::new(2, 10, 20, 5, [0, 200, 0, 255])
@@ -370,43 +372,52 @@ mod tests {
     #[test]
     fn parse_protocol_kitty() {
         let args: Vec<String> = vec!["--protocol", "kitty"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Kitty));
     }
 
     #[test]
     fn parse_protocol_sixel() {
         let args: Vec<String> = vec!["--protocol", "sixel"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Sixel));
     }
 
     #[test]
     fn parse_protocol_auto() {
         let args: Vec<String> = vec!["--protocol", "auto"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Auto));
     }
 
     #[test]
     fn parse_protocol_unknown_value_falls_back_to_auto() {
         let args: Vec<String> = vec!["--protocol", "unknown"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         // Prints a warning to stderr, returns Some(Auto)
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Auto));
     }
 
     #[test]
     fn parse_protocol_missing_value_warns() {
-        let args: Vec<String> = vec!["--protocol"]
-            .into_iter().map(String::from).collect();
+        let args: Vec<String> = vec!["--protocol"].into_iter().map(String::from).collect();
         assert_eq!(parse_protocol_flag_from(&args), None);
     }
 
     #[test]
     fn parse_protocol_first_wins_on_duplicates() {
         let args: Vec<String> = vec!["--protocol", "kitty", "--protocol", "sixel"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Kitty));
     }
 
@@ -419,7 +430,9 @@ mod tests {
     #[test]
     fn parse_protocol_with_other_flags() {
         let args: Vec<String> = vec!["--probe", "--protocol", "sixel", "--tmux-passthrough"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(parse_protocol_flag_from(&args), Some(Protocol::Sixel));
     }
 
@@ -433,14 +446,19 @@ mod tests {
 
     #[test]
     fn parse_probe_absent() {
-        let args: Vec<String> = vec!["--protocol", "kitty"].into_iter().map(String::from).collect();
+        let args: Vec<String> = vec!["--protocol", "kitty"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert!(!parse_probe_flag_from(&args));
     }
 
     #[test]
     fn parse_probe_with_other_flags() {
         let args: Vec<String> = vec!["--protocol", "sixel", "--probe", "--tmux-passthrough"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert!(parse_probe_flag_from(&args));
     }
 
@@ -448,7 +466,10 @@ mod tests {
 
     #[test]
     fn parse_tmux_passthrough_present() {
-        let args: Vec<String> = vec!["--tmux-passthrough"].into_iter().map(String::from).collect();
+        let args: Vec<String> = vec!["--tmux-passthrough"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert!(parse_tmux_passthrough_flag_from(&args));
     }
 
@@ -468,14 +489,19 @@ mod tests {
 
     #[test]
     fn parse_animate_absent() {
-        let args: Vec<String> = vec!["--protocol", "kitty"].into_iter().map(String::from).collect();
+        let args: Vec<String> = vec!["--protocol", "kitty"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert!(!parse_animate_flag_from(&args));
     }
 
     #[test]
     fn parse_animate_with_fps() {
         let args: Vec<String> = vec!["--animate", "--fps", "60"]
-            .into_iter().map(String::from).collect();
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert!(parse_animate_flag_from(&args));
         assert_eq!(parse_fps_flag_from(&args), Some(60.0));
     }
@@ -524,7 +550,10 @@ mod tests {
     #[test]
     fn build_demo_stack_rect_scales_with_terminal_size() {
         let (stack1, _, _) = build_demo_stack(TerminalSize { rows: 24, cols: 80 });
-        let (stack2, _, _) = build_demo_stack(TerminalSize { rows: 48, cols: 160 });
+        let (stack2, _, _) = build_demo_stack(TerminalSize {
+            rows: 48,
+            cols: 160,
+        });
         assert_eq!(stack1.len(), 3);
         assert_eq!(stack2.len(), 3);
         // Rect in the larger terminal should be wider/taller.
@@ -532,8 +561,14 @@ mod tests {
         let bounds2 = stack2.entries()[1].layer().bounds();
         // The rect is the 2nd layer (index 1).
         if let (Some(r1), Some(r2)) = (bounds1, bounds2) {
-            assert!(r2.width > r1.width, "larger terminal should produce wider rect");
-            assert!(r2.height > r1.height, "larger terminal should produce taller rect");
+            assert!(
+                r2.width > r1.width,
+                "larger terminal should produce wider rect"
+            );
+            assert!(
+                r2.height > r1.height,
+                "larger terminal should produce taller rect"
+            );
         }
     }
 
@@ -566,7 +601,10 @@ mod tests {
             let _guard1 = TmuxPassthroughGuard::set(Some("1"));
             assert_eq!(std::env::var("TMUXPASSTHROUGH").unwrap(), "1");
         }
-        assert!(std::env::var("TMUXPASSTHROUGH").is_err(), "should be removed after drop when absent before");
+        assert!(
+            std::env::var("TMUXPASSTHROUGH").is_err(),
+            "should be removed after drop when absent before"
+        );
 
         // --- Test 2: set(None) when present removes var, drop restores ---
         std::env::set_var("TMUXPASSTHROUGH", "existing");

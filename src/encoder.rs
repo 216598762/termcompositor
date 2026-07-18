@@ -654,8 +654,7 @@ mod kitty {
             // for a 2MP image) before chunking, which
             // v0.8.2 eliminates.
             let chunk_pixels = &pixels[start_pixel..end_pixel];
-            let chunk_rgba: Vec<u8> =
-                chunk_pixels.iter().flatten().copied().collect();
+            let chunk_rgba: Vec<u8> = chunk_pixels.iter().flatten().copied().collect();
             let is_last = chunk_idx + 1 == num_chunks;
             let m_value: u32 = if is_last { 0 } else { 1 };
 
@@ -783,10 +782,7 @@ mod kitty {
     /// has no escape mechanism and would treat the inner
     /// `\x1b\\` as the outer passthrough terminator
     /// (corrupting the sequence).
-    pub fn wrap_for_tmux_to_writer<W: Write>(
-        inner: &[u8],
-        out: &mut W,
-    ) -> std::io::Result<()> {
+    pub fn wrap_for_tmux_to_writer<W: Write>(inner: &[u8], out: &mut W) -> std::io::Result<()> {
         // The DCS prefix is `ESC P tmux ;` (7 bytes) --
         // written once, regardless of the inner size.
         out.write_all(b"\x1bPtmux;")?;
@@ -841,8 +837,7 @@ mod kitty {
         // `io::Error` a `Vec<u8>` can return is
         // `io::ErrorKind::WriteZero` from a full disk,
         // which doesn't apply to in-memory writes).
-        wrap_for_tmux_to_writer(&inner, &mut out)
-            .expect("writing to Vec<u8> cannot fail");
+        wrap_for_tmux_to_writer(&inner, &mut out).expect("writing to Vec<u8> cannot fail");
         out
     }
 
@@ -999,13 +994,13 @@ mod kitty {
 // `encode_passthrough_to_writer`) let the entire
 // encode + wrap + emit pipeline run in O(1) memory.
 #[cfg(feature = "kitty-encoder")]
+pub use kitty::encode_passthrough_to_writer;
+#[cfg(feature = "kitty-encoder")]
 pub use kitty::wrap_for_tmux;
 #[cfg(feature = "kitty-encoder")]
 pub use kitty::wrap_for_tmux_to_writer;
 #[cfg(feature = "kitty-encoder")]
 pub use kitty::PassthroughWriter;
-#[cfg(feature = "kitty-encoder")]
-pub use kitty::encode_passthrough_to_writer;
 
 /// The Sixel graphics protocol encoder, gated on the
 /// `sixel-encoder` Cargo feature. Implemented as a private
@@ -1201,8 +1196,7 @@ mod sixel {
             let r_idx = i / 36;
             let g_idx = (i / 6) % 6;
             let b_idx = i % 6;
-            palette[16 + i] =
-                (CUBE_VALUES[r_idx], CUBE_VALUES[g_idx], CUBE_VALUES[b_idx]);
+            palette[16 + i] = (CUBE_VALUES[r_idx], CUBE_VALUES[g_idx], CUBE_VALUES[b_idx]);
             i += 1;
         }
         // 232-255: 24 grayscale ramp with values
@@ -1236,9 +1230,7 @@ mod sixel {
                         let r = (u16::from(r5) * 255) / 31;
                         let g = (u16::from(g5) * 255) / 31;
                         let b = (u16::from(b5) * 255) / 31;
-                        let idx = (r5 as usize) * 32 * 32
-                            + (g5 as usize) * 32
-                            + (b5 as usize);
+                        let idx = (r5 as usize) * 32 * 32 + (g5 as usize) * 32 + (b5 as usize);
                         lut[idx] = nearest_palette_index(r, g, b);
                     }
                 }
@@ -1372,9 +1364,7 @@ mod sixel {
                             count += 1;
                         }
                     }
-                    if count > best_count
-                        || (count == best_count && palette_i < best_color)
-                    {
+                    if count > best_count || (count == best_count && palette_i < best_color) {
                         best_count = count;
                         best_color = palette_i;
                     }
@@ -1398,9 +1388,7 @@ mod sixel {
                 // announce the first color (even if it's 0)
                 // to set the initial color state.
                 if !color_announced || best_color != current_color {
-                    flush_sixel_rle(
-                        &mut run_char, &mut run_len, out,
-                    )?;
+                    flush_sixel_rle(&mut run_char, &mut run_len, out)?;
                     write!(out, "#{best_color}")?;
                     current_color = best_color;
                     color_announced = true;
@@ -1413,9 +1401,7 @@ mod sixel {
                 if Some(char) == run_char {
                     run_len += 1;
                 } else {
-                    flush_sixel_rle(
-                        &mut run_char, &mut run_len, out,
-                    )?;
+                    flush_sixel_rle(&mut run_char, &mut run_len, out)?;
                     run_char = Some(char);
                     run_len = 1;
                 }
@@ -2340,7 +2326,7 @@ mod tests {
     fn kitty_encode_single_chunk_produces_no_m_key() {
         with_env(None, None, None, None, || {
             let mut fb = FrameBuffer::new(2, 2);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             // Starts with the APC introducer and ends with the
             // APC terminator (existing v0.8.0 framing).
@@ -2374,7 +2360,7 @@ mod tests {
             // 768 * 1 = 768 pixels, single row. Width*height
             // is exactly PIXELS_PER_CHUNK.
             let mut fb = FrameBuffer::new(super::kitty::PIXELS_PER_CHUNK as u32, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             let payload_start = "\x1b_G".len();
@@ -2399,7 +2385,7 @@ mod tests {
         with_env(None, None, None, None, || {
             let w = super::kitty::PIXELS_PER_CHUNK as u32 + 1; // 769
             let mut fb = FrameBuffer::new(w, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // Count APC introducers (each chunk starts with
@@ -2438,7 +2424,7 @@ mod tests {
             // 2 * 768 + 1 = 1537 pixels -> 3 chunks (768, 768, 1).
             let w = (super::kitty::PIXELS_PER_CHUNK * 2 + 1) as u32;
             let mut fb = FrameBuffer::new(w, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // Exactly 3 chunks.
@@ -2486,7 +2472,7 @@ mod tests {
             // PIXELS_PER_CHUNK (no last-chunk remainder). This
             // way ALL three chunks must be 4096-char aligned.
             let mut fb = FrameBuffer::new((super::kitty::PIXELS_PER_CHUNK * 3) as u32, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let bytes = super::kitty::encode(&fb).unwrap();
             let s = std::str::from_utf8(&bytes).unwrap();
             // For each chunk, find the `;` (end of controls)
@@ -2500,11 +2486,8 @@ mod tests {
                 let abs_semicolon = match s[abs_intro..].find(';') {
                     Some(pos) => abs_intro + pos,
                     None => {
-                        search_from = s[abs_intro..]
-                            .find("\x1b\\")
-                            .unwrap()
-                            + abs_intro
-                            + "\x1b\\".len();
+                        search_from =
+                            s[abs_intro..].find("\x1b\\").unwrap() + abs_intro + "\x1b\\".len();
                         continue;
                     }
                 };
@@ -2580,7 +2563,7 @@ mod tests {
         with_env(None, None, None, None, || {
             // Exactly 768 pixels = single chunk boundary.
             let mut fb = FrameBuffer::new(768, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
@@ -2610,7 +2593,7 @@ mod tests {
         with_env(None, None, None, None, || {
             // 1537 pixels -> 3 chunks (768 + 768 + 1).
             let mut fb = FrameBuffer::new(1537, 1);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
@@ -2680,14 +2663,14 @@ mod tests {
             let w: u32 = 1920;
             let h: u32 = 1080;
             let mut fb = FrameBuffer::new(w, h);
-        fb.pixels_mut()[0] = [255, 0, 0, 255];
+            fb.pixels_mut()[0] = [255, 0, 0, 255];
             let mut out: Vec<u8> = Vec::new();
             super::kitty::encode_to_writer(&fb, &mut out).unwrap();
             let s = std::str::from_utf8(&out).unwrap();
             // Expected chunk count: ceil(1920*1080 / 768)
             // = ceil(2_073_600 / 768) = 2_701.
-            let expected_chunks = (w as usize * h as usize)
-                .div_ceil(super::kitty::PIXELS_PER_CHUNK);
+            let expected_chunks =
+                (w as usize * h as usize).div_ceil(super::kitty::PIXELS_PER_CHUNK);
             assert_eq!(
                 s.matches("\x1b_G").count(),
                 expected_chunks + 1,
@@ -2785,8 +2768,7 @@ mod tests {
         let fb_zero_both = FrameBuffer::new(0, 0);
         let mut buf: Vec<u8> = Vec::new();
         for fb in [&fb_zero_w, &fb_zero_h, &fb_zero_both] {
-            let err = super::sixel::encode_to_writer(fb, &mut buf)
-                .unwrap_err();
+            let err = super::sixel::encode_to_writer(fb, &mut buf).unwrap_err();
             assert!(matches!(err, EncoderError::InvalidDimensions { .. }));
         }
         // The buffer must be untouched (the error is
@@ -2864,8 +2846,7 @@ mod tests {
             *px = [255, 0, 0, 255]; // red
         }
         let mut out: Vec<u8> = Vec::new();
-        super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(
             s.starts_with("\x1bP0;0;2;2q"),
@@ -2893,8 +2874,7 @@ mod tests {
             *px = [255, 0, 0, 255]; // red
         }
         let mut out: Vec<u8> = Vec::new();
-        super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(
             s.contains('!'),
@@ -2913,8 +2893,7 @@ mod tests {
             *px = [0, 255, 0, 255]; // green
         }
         let mut out: Vec<u8> = Vec::new();
-        super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         let separator_count = s.matches('-').count();
         assert_eq!(
@@ -2934,10 +2913,7 @@ mod tests {
         let fb_zero_both = FrameBuffer::new(0, 0);
         let mut buf: Vec<u8> = Vec::new();
         for fb in [&fb_zero_w, &fb_zero_h, &fb_zero_both] {
-            let err = super::sixel::encode_to_writer_streaming(
-                fb, &mut buf,
-            )
-            .unwrap_err();
+            let err = super::sixel::encode_to_writer_streaming(fb, &mut buf).unwrap_err();
             assert!(matches!(err, EncoderError::InvalidDimensions { .. }));
         }
         assert!(buf.is_empty());
@@ -2955,8 +2931,7 @@ mod tests {
         let h: u32 = 1080;
         let fb = FrameBuffer::new(w, h);
         let mut out: Vec<u8> = Vec::new();
-        super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
         assert!(!out.is_empty());
         assert!(out.starts_with(b"\x1bP"));
         assert!(out.ends_with(b"\x1b\\"));
@@ -2995,12 +2970,10 @@ mod tests {
     #[cfg(feature = "kitty-encoder")]
     #[test]
     fn wrap_for_tmux_to_writer_matches_wrap_for_tmux() {
-        let inner: Vec<u8> =
-            b"\x1b_Ga=T,f=32,q=2,s=2,v=2;AAAA\x1b\\".to_vec();
+        let inner: Vec<u8> = b"\x1b_Ga=T,f=32,q=2,s=2,v=2;AAAA\x1b\\".to_vec();
         let from_vec = super::kitty::wrap_for_tmux(inner.clone());
         let mut from_streaming: Vec<u8> = Vec::new();
-        super::kitty::wrap_for_tmux_to_writer(&inner, &mut from_streaming)
-            .unwrap();
+        super::kitty::wrap_for_tmux_to_writer(&inner, &mut from_streaming).unwrap();
         assert_eq!(from_vec, from_streaming);
     }
 
@@ -3014,8 +2987,7 @@ mod tests {
     fn wrap_for_tmux_to_writer_doubles_inner_esc_bytes() {
         let inner: Vec<u8> = b"\x1b_Ga=T\x1bTEST\x1b\\".to_vec();
         let mut out: Vec<u8> = Vec::new();
-        super::kitty::wrap_for_tmux_to_writer(&inner, &mut out)
-            .unwrap();
+        super::kitty::wrap_for_tmux_to_writer(&inner, &mut out).unwrap();
         // The streaming output must be byte-for-byte
         // equal to the v0.8.0 `wrap_for_tmux` output.
         let from_vec = super::kitty::wrap_for_tmux(inner.clone());
@@ -3030,8 +3002,7 @@ mod tests {
     #[test]
     fn wrap_for_tmux_to_writer_handles_empty() {
         let mut out: Vec<u8> = Vec::new();
-        super::kitty::wrap_for_tmux_to_writer(&[], &mut out)
-            .unwrap();
+        super::kitty::wrap_for_tmux_to_writer(&[], &mut out).unwrap();
         assert_eq!(out, b"\x1bPtmux;\x1b\\");
     }
 
@@ -3064,8 +3035,7 @@ mod tests {
         assert!(out.starts_with(b"\x1bPtmux;"));
         // The full output must be byte-for-byte equal to
         // the v0.8.0 `wrap_for_tmux` reference output.
-        let reference =
-            super::kitty::wrap_for_tmux(b"\x1b_Ga=T\x1bTEST\x1b\\".to_vec());
+        let reference = super::kitty::wrap_for_tmux(b"\x1b_Ga=T\x1bTEST\x1b\\".to_vec());
         assert_eq!(out, reference);
     }
 
@@ -3093,16 +3063,12 @@ mod tests {
             let fb = FrameBuffer::new(2, 2);
             let from_passthrough: Vec<u8> = {
                 let mut out: Vec<u8> = Vec::new();
-                super::kitty::encode_passthrough_to_writer(
-                    &fb, &mut out,
-                )
-                .unwrap();
+                super::kitty::encode_passthrough_to_writer(&fb, &mut out).unwrap();
                 out
             };
             let from_encode: Vec<u8> = {
                 let mut out: Vec<u8> = Vec::new();
-                super::kitty::encode_to_writer(&fb, &mut out)
-                    .unwrap();
+                super::kitty::encode_to_writer(&fb, &mut out).unwrap();
                 out
             };
             // Without the tmux opt-in, the two outputs
@@ -3127,10 +3093,7 @@ mod tests {
             _tmux.set(Some("/tmp/tmux-1000/default,12345,0"));
             let fb = FrameBuffer::new(2, 2);
             let mut out: Vec<u8> = Vec::new();
-            super::kitty::encode_passthrough_to_writer(
-                &fb, &mut out,
-            )
-            .unwrap();
+            super::kitty::encode_passthrough_to_writer(&fb, &mut out).unwrap();
             // With the tmux opt-in, the output MUST be
             // wrapped: starts with the DCS prefix and
             // ends with the DCS terminator.
@@ -3141,8 +3104,7 @@ mod tests {
             // &fb)` reference output (which materialises
             // both the encode and the wrap in Vecs). The
             // streaming path must produce the same bytes.
-            let from_dispatch =
-                dispatch(Protocol::Kitty, &fb).unwrap();
+            let from_dispatch = dispatch(Protocol::Kitty, &fb).unwrap();
             assert_eq!(out, from_dispatch);
         });
     }
@@ -3257,8 +3219,7 @@ mod tests {
     fn dispatch_to_writer_kitty_unsupported_without_feature() {
         let fb = FrameBuffer::new(2, 2);
         let mut out: Vec<u8> = Vec::new();
-        let err = super::dispatch_to_writer(Protocol::Kitty, &fb, &mut out)
-            .unwrap_err();
+        let err = super::dispatch_to_writer(Protocol::Kitty, &fb, &mut out).unwrap_err();
         assert_eq!(err, EncoderError::UnsupportedProtocol("kitty"));
         // Buffer must be untouched.
         assert!(out.is_empty());
@@ -3272,8 +3233,7 @@ mod tests {
     fn dispatch_to_writer_sixel_unsupported_without_feature() {
         let fb = FrameBuffer::new(2, 2);
         let mut out: Vec<u8> = Vec::new();
-        let err = super::dispatch_to_writer(Protocol::Sixel, &fb, &mut out)
-            .unwrap_err();
+        let err = super::dispatch_to_writer(Protocol::Sixel, &fb, &mut out).unwrap_err();
         assert_eq!(err, EncoderError::UnsupportedProtocol("sixel"));
         assert!(out.is_empty());
     }
@@ -3291,11 +3251,25 @@ mod tests {
         let mut out = Vec::new();
         super::kitty::encode_to_writer(&fb, &mut out).unwrap();
         let output = std::str::from_utf8(&out).expect("non-UTF8 output");
-        assert!(output.contains("a=T"), "transmit command missing: {:?}", output);
-        assert!(output.contains("a=p,i=1,z=-1"), "place command missing: {:?}", output);
+        assert!(
+            output.contains("a=T"),
+            "transmit command missing: {:?}",
+            output
+        );
+        assert!(
+            output.contains("a=p,i=1,z=-1"),
+            "place command missing: {:?}",
+            output
+        );
         let transmit_pos = output.find("a=T").unwrap();
         let place_pos = output.find("a=p,i=1,z=-1").unwrap();
-        assert!(place_pos > transmit_pos, "place must come after transmit; transmit at {} place at {}: {:?}", transmit_pos, place_pos, output);
+        assert!(
+            place_pos > transmit_pos,
+            "place must come after transmit; transmit at {} place at {}: {:?}",
+            transmit_pos,
+            place_pos,
+            output
+        );
     }
 
     /// v0.12.2: a fully-transparent framebuffer must
@@ -3308,9 +3282,22 @@ mod tests {
         let mut out = Vec::new();
         super::kitty::encode_to_writer(&fb, &mut out).unwrap();
         let output = std::str::from_utf8(&out).expect("non-UTF8 output");
-        assert!(output.contains("a=d,d=I,i=1"), "delete command missing: {:?}", output);
-        assert!(!output.contains("a=T"), "transmit must NOT be emitted for transparent framebuffer: {:?}", output);
-        assert!(out.len() < 64, "short-circuit output should be <64 bytes, got {} bytes: {:?}", out.len(), output);
+        assert!(
+            output.contains("a=d,d=I,i=1"),
+            "delete command missing: {:?}",
+            output
+        );
+        assert!(
+            !output.contains("a=T"),
+            "transmit must NOT be emitted for transparent framebuffer: {:?}",
+            output
+        );
+        assert!(
+            out.len() < 64,
+            "short-circuit output should be <64 bytes, got {} bytes: {:?}",
+            out.len(),
+            output
+        );
     }
 
     /// v0.12.2: the FrameBuffer::is_fully_transparent
@@ -3351,24 +3338,19 @@ mod tests {
             width: 0,
             height: 5,
         };
-        assert_eq!(
-            err.to_string(),
-            "framebuffer has invalid dimensions: 0x5"
-        );
+        assert_eq!(err.to_string(), "framebuffer has invalid dimensions: 0x5");
     }
 
     #[test]
     fn encoder_error_is_std_error() {
-        let err: Box<dyn std::error::Error> =
-            Box::new(EncoderError::Encode("test".to_string()));
+        let err: Box<dyn std::error::Error> = Box::new(EncoderError::Encode("test".to_string()));
         assert!(err.to_string().contains("encoder failed"));
         assert!(err.source().is_none());
-    }    // ── From<std::io::Error> conversion ────────────────────────
+    } // ── From<std::io::Error> conversion ────────────────────────
     #[cfg(any(feature = "kitty-encoder", feature = "sixel-encoder"))]
     #[test]
     fn from_io_error_converts_to_encode() {
-        let io_err =
-            std::io::Error::new(std::io::ErrorKind::Other, "write failed");
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "write failed");
         let enc_err: EncoderError = io_err.into();
         match enc_err {
             EncoderError::Encode(msg) => {
@@ -3418,17 +3400,12 @@ mod tests {
         let inner = vec![0x1b, b'_', b'G', 0x1b, 0x5c, 0x1b];
         let wrapped = super::kitty::wrap_for_tmux(inner.clone());
         // Should contain the DCS prefix and suffix
-        assert!(
-            wrapped
-                .windows(7)
-                .any(|w| w == b"\x1bPtmux;")
-        );
+        assert!(wrapped.windows(7).any(|w| w == b"\x1bPtmux;"));
         assert!(wrapped.windows(2).any(|w| w == b"\x1b\\"));
         // Inner ESC bytes should be doubled: 3 ESCs -> 6, plus prefix
         // (1) + suffix (1) = 8 total
         let inner_esc_count = inner.iter().filter(|&&b| b == 0x1b).count();
-        let wrapped_esc_count =
-            wrapped.iter().filter(|&&b| b == 0x1b).count();
+        let wrapped_esc_count = wrapped.iter().filter(|&&b| b == 0x1b).count();
         assert_eq!(wrapped_esc_count, inner_esc_count * 2 + 2);
     }
 
@@ -3445,8 +3422,7 @@ mod tests {
         let inner = vec![0x1b, b'A', 0x1b, b'B', b'C'];
         let via_fn = super::kitty::wrap_for_tmux(inner.clone());
         let mut via_writer = Vec::new();
-        super::kitty::wrap_for_tmux_to_writer(&inner, &mut via_writer)
-            .unwrap();
+        super::kitty::wrap_for_tmux_to_writer(&inner, &mut via_writer).unwrap();
         assert_eq!(via_fn, via_writer);
     }
 
@@ -3516,11 +3492,7 @@ mod tests {
         let fb = FrameBuffer::new(2, 2);
         let mut out_passthrough = Vec::new();
         let mut out_regular = Vec::new();
-        super::kitty::encode_passthrough_to_writer(
-            &fb,
-            &mut out_passthrough,
-        )
-        .unwrap();
+        super::kitty::encode_passthrough_to_writer(&fb, &mut out_passthrough).unwrap();
         super::kitty::encode_to_writer(&fb, &mut out_regular).unwrap();
         assert_eq!(out_passthrough, out_regular);
     }
@@ -3532,8 +3504,7 @@ mod tests {
     fn sixel_streaming_rejects_zero_width() {
         let fb = FrameBuffer::new(0, 10);
         let mut out = Vec::new();
-        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap_err();
+        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap_err();
         assert!(matches!(
             err,
             EncoderError::InvalidDimensions {
@@ -3548,8 +3519,7 @@ mod tests {
     fn sixel_streaming_rejects_zero_height() {
         let fb = FrameBuffer::new(10, 0);
         let mut out = Vec::new();
-        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap_err();
+        let err = super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap_err();
         assert!(matches!(
             err,
             EncoderError::InvalidDimensions {
@@ -3564,8 +3534,7 @@ mod tests {
     fn sixel_streaming_produces_valid_dcs() {
         let fb = FrameBuffer::new(4, 4);
         let mut out = Vec::new();
-        super::sixel::encode_to_writer_streaming(&fb, &mut out)
-            .unwrap();
+        super::sixel::encode_to_writer_streaming(&fb, &mut out).unwrap();
         assert!(!out.is_empty());
         // Should start with DCS header
         assert!(out.starts_with(b"\x1bP"));
@@ -3635,13 +3604,8 @@ mod tests {
     #[cfg(feature = "kitty-encoder")]
     #[test]
     fn io_error_converts_to_encoder_error_encode() {
-        let io_err =
-            std::io::Error::new(std::io::ErrorKind::Other, "disk full");
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "disk full");
         let enc_err: EncoderError = io_err.into();
-        assert_eq!(
-            enc_err.to_string(),
-            "encoder failed: disk full"
-        );
+        assert_eq!(enc_err.to_string(), "encoder failed: disk full");
     }
-
 }

@@ -65,13 +65,13 @@ pub use compositor::{Compositor, CpuCompositor, DirtyRect, DirtyRegion, LayerSta
 #[cfg(feature = "kitty-encoder")]
 pub use encoder::detect_with_probe;
 #[cfg(feature = "kitty-encoder")]
+pub use encoder::encode_passthrough_to_writer;
+#[cfg(feature = "kitty-encoder")]
 pub use encoder::wrap_for_tmux;
 #[cfg(feature = "kitty-encoder")]
 pub use encoder::wrap_for_tmux_to_writer;
 #[cfg(feature = "kitty-encoder")]
 pub use encoder::PassthroughWriter;
-#[cfg(feature = "kitty-encoder")]
-pub use encoder::encode_passthrough_to_writer;
 // NOTE: the v0.8.4 `sixel::encode_to_writer` is re-exported
 // at the `encoder` module level (see
 // `termcompositor::encoder::encode_to_writer`) but NOT at
@@ -85,13 +85,17 @@ pub use encoder::encode_passthrough_to_writer;
 pub use encoder::{detect, dispatch_to_writer, EncoderError, Protocol, ProtocolEncoder};
 pub use framebuffer::{blend_over, FrameBuffer};
 pub use geometry::{Rect, Transform};
+#[cfg(feature = "font-rasterizer")]
+pub use layer::FontSource;
 #[cfg(feature = "image-decoder")]
 pub use layer::ImageLayer;
 #[cfg(feature = "svg-renderer")]
 pub use layer::SVGLayer;
-#[cfg(feature = "font-rasterizer")]
-pub use layer::FontSource;
-pub use layer::{AccessibilityMetadata, BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow, SceneGraph, GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SemanticRole, ShadowLayer, SolidColor, TextAlignment, TextLayer};
+pub use layer::{
+    AccessibilityMetadata, BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DropShadow,
+    GradientKind, GradientLayer, Layer, LayerEntry, LayerId, RectLayer, SceneGraph, SemanticRole,
+    ShadowLayer, SolidColor, TextAlignment, TextLayer,
+};
 pub use terminal::TerminalSize;
 
 // Re-export animation module at crate root for convenience.

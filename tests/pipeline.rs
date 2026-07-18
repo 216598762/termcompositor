@@ -10,7 +10,6 @@
 //! - `wrap_for_tmux()` / `wrap_for_tmux_to_writer()`
 //! - `encode_passthrough_to_writer()`
 
-
 #[allow(unused_imports)]
 use std::io::Write;
 
@@ -413,19 +412,13 @@ mod error_paths {
             width: 0,
             height: 10,
         };
-        assert_eq!(
-            err.to_string(),
-            "framebuffer has invalid dimensions: 0x10"
-        );
+        assert_eq!(err.to_string(), "framebuffer has invalid dimensions: 0x10");
     }
 
     #[test]
     fn encode_error_display() {
         let err = termcompositor::EncoderError::Encode("something broke".into());
-        assert_eq!(
-            err.to_string(),
-            "encoder failed: something broke"
-        );
+        assert_eq!(err.to_string(), "encoder failed: something broke");
     }
 }
 
@@ -542,9 +535,16 @@ mod gradient_pipeline {
         stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
         stack.push(
             GradientLayer::linear(
-                0, 0, 20, 10,
-                [255, 0, 0, 255], [0, 0, 255, 255],
-                0, 0, 20, 10,
+                0,
+                0,
+                20,
+                10,
+                [255, 0, 0, 255],
+                [0, 0, 255, 255],
+                0,
+                0,
+                20,
+                10,
             )
             .with_z(10),
         );
@@ -569,9 +569,15 @@ mod gradient_pipeline {
         let mut stack = LayerStack::new();
         stack.push(
             GradientLayer::radial(
-                0, 0, 20, 20,
-                [255, 255, 255, 255], [0, 0, 0, 255],
-                10, 10, 10,
+                0,
+                0,
+                20,
+                20,
+                [255, 255, 255, 255],
+                [0, 0, 0, 255],
+                10,
+                10,
+                10,
             )
             .with_z(5),
         );
@@ -596,9 +602,16 @@ mod gradient_pipeline {
         stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
         stack.push(
             GradientLayer::linear(
-                0, 0, 20, 10,
-                [255, 0, 0, 255], [0, 0, 255, 255],
-                0, 0, 20, 10,
+                0,
+                0,
+                20,
+                10,
+                [255, 0, 0, 255],
+                [0, 0, 255, 255],
+                0,
+                0,
+                20,
+                10,
             )
             .with_z(10),
         );
@@ -615,9 +628,15 @@ mod gradient_pipeline {
         let mut stack = LayerStack::new();
         stack.push(
             GradientLayer::radial(
-                0, 0, 20, 20,
-                [255, 255, 255, 255], [0, 0, 0, 255],
-                10, 10, 10,
+                0,
+                0,
+                20,
+                20,
+                [255, 255, 255, 255],
+                [0, 0, 0, 255],
+                10,
+                10,
+                10,
             )
             .with_z(5),
         );
@@ -626,7 +645,10 @@ mod gradient_pipeline {
         stack.render(&mut fb);
 
         let bytes = Protocol::Sixel.encode(&fb).unwrap();
-        assert!(!bytes.is_empty(), "Sixel radial gradient output must not be empty");
+        assert!(
+            !bytes.is_empty(),
+            "Sixel radial gradient output must not be empty"
+        );
     }
 }
 
@@ -640,10 +662,7 @@ mod border_pipeline {
     fn kitty_border_layer_pipeline() {
         let mut stack = LayerStack::new();
         stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
-        stack.push(
-            BorderLayer::new(2, 2, 6, 4, [255, 200, 0, 255], 1)
-                .with_z(10),
-        );
+        stack.push(BorderLayer::new(2, 2, 6, 4, [255, 200, 0, 255], 1).with_z(10));
 
         let mut fb = FrameBuffer::new(20, 10);
         stack.render(&mut fb);
@@ -661,10 +680,7 @@ mod border_pipeline {
     fn sixel_border_layer_pipeline() {
         let mut stack = LayerStack::new();
         stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
-        stack.push(
-            BorderLayer::new(1, 1, 8, 6, [0, 255, 200, 255], 2)
-                .with_z(10),
-        );
+        stack.push(BorderLayer::new(1, 1, 8, 6, [0, 255, 200, 255], 2).with_z(10));
 
         let mut fb = FrameBuffer::new(20, 10);
         stack.render(&mut fb);

@@ -189,8 +189,9 @@ fn bench_layerstack_many_rects(c: &mut Criterion) {
     for i in 0..50 {
         let x = (i * 17) % 700;
         let y = (i * 31) % 500;
-        stack.push(                RectLayer::new(x, y, 60, 40, [(i * 50) as u8, 100, 200, 150])
-                    .with_z(i)
+        stack.push(
+            RectLayer::new(x, y, 60, 40, [(i * 50) as u8, 100, 200, 150])
+                .with_z(i)
                 .with_name(format!("rect_{i}")),
         );
     }
@@ -216,14 +217,17 @@ mod text_benches {
         let multi = TextLayer::new(0, 0, "line1\nline2\nline3\nline4\nline5", [255; 4]);
 
         c.bench_function("text/text_width_short", |b| b.iter(|| short.text_width()));
-        c.bench_function("text/text_width_200_chars", |b| b.iter(|| long.text_width()));
-        c.bench_function("text/text_width_multi_line", |b| b.iter(|| multi.text_width()));
+        c.bench_function("text/text_width_200_chars", |b| {
+            b.iter(|| long.text_width())
+        });
+        c.bench_function("text/text_width_multi_line", |b| {
+            b.iter(|| multi.text_width())
+        });
     }
 
     pub fn bench_text_layer_render(c: &mut Criterion) {
         let short = TextLayer::new(0, 0, "Hello", [200, 100, 50, 255]).with_font_size(14.0);
-        let short_large =
-            TextLayer::new(0, 0, "Hello", [200, 100, 50, 255]).with_font_size(48.0);
+        let short_large = TextLayer::new(0, 0, "Hello", [200, 100, 50, 255]).with_font_size(48.0);
         let multi =
             TextLayer::new(0, 0, "line1\nline2\nline3", [200, 100, 50, 255]).with_font_size(14.0);
 
@@ -234,7 +238,9 @@ mod text_benches {
 
         let mut fb_large = FrameBuffer::new(500, 60);
         c.bench_function("text/render_short_48px", |b| {
-            b.iter(|| short_large.render(black_box(&mut fb_large), black_box((0, 0)), black_box(1.0)))
+            b.iter(|| {
+                short_large.render(black_box(&mut fb_large), black_box((0, 0)), black_box(1.0))
+            })
         });
 
         let mut fb_multi = FrameBuffer::new(100, 60);
@@ -386,4 +392,11 @@ criterion_group!(
     targets = sixel_benches::bench_sixel_encode,
 );
 
-criterion_main!(framebuffer, layers, compositor, text, encoder_kitty, encoder_sixel);
+criterion_main!(
+    framebuffer,
+    layers,
+    compositor,
+    text,
+    encoder_kitty,
+    encoder_sixel
+);

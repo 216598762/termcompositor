@@ -459,39 +459,39 @@ mod tests {
     }
 }
 
-    #[test]
-    fn fill_rect_basic() {
-        let mut fb = FrameBuffer::new(10, 10);
-        fb.fill_rect(2, 3, 4, 2, [255, 0, 0, 255]);
-        assert_eq!(fb.get_pixel(2, 3), Some(&[255, 0, 0, 255]));
-        assert_eq!(fb.get_pixel(5, 4), Some(&[255, 0, 0, 255]));
-        assert_eq!(fb.get_pixel(6, 3), Some(&[0, 0, 0, 0]));
-        assert_eq!(fb.get_pixel(2, 5), Some(&[0, 0, 0, 0]));
-    }
+#[test]
+fn fill_rect_basic() {
+    let mut fb = FrameBuffer::new(10, 10);
+    fb.fill_rect(2, 3, 4, 2, [255, 0, 0, 255]);
+    assert_eq!(fb.get_pixel(2, 3), Some(&[255, 0, 0, 255]));
+    assert_eq!(fb.get_pixel(5, 4), Some(&[255, 0, 0, 255]));
+    assert_eq!(fb.get_pixel(6, 3), Some(&[0, 0, 0, 0]));
+    assert_eq!(fb.get_pixel(2, 5), Some(&[0, 0, 0, 0]));
+}
 
-    #[test]
-    fn fill_rect_clips_to_framebuffer() {
-        let mut fb = FrameBuffer::new(5, 5);
-        fb.fill_rect(3, 3, 10, 10, [0, 255, 0, 255]);
-        assert_eq!(fb.get_pixel(3, 3), Some(&[0, 255, 0, 255]));
-        assert_eq!(fb.get_pixel(4, 4), Some(&[0, 255, 0, 255]));
-        // Should not panic on out-of-bounds region.
-    }
+#[test]
+fn fill_rect_clips_to_framebuffer() {
+    let mut fb = FrameBuffer::new(5, 5);
+    fb.fill_rect(3, 3, 10, 10, [0, 255, 0, 255]);
+    assert_eq!(fb.get_pixel(3, 3), Some(&[0, 255, 0, 255]));
+    assert_eq!(fb.get_pixel(4, 4), Some(&[0, 255, 0, 255]));
+    // Should not panic on out-of-bounds region.
+}
 
-    #[test]
-    fn fill_rect_zero_size_is_noop() {
-        let mut fb = FrameBuffer::new(5, 5);
-        fb.fill_rect(0, 0, 0, 0, [255, 0, 0, 255]);
-        assert!(fb.pixels().iter().all(|p| *p == [0, 0, 0, 0]));
-    }
+#[test]
+fn fill_rect_zero_size_is_noop() {
+    let mut fb = FrameBuffer::new(5, 5);
+    fb.fill_rect(0, 0, 0, 0, [255, 0, 0, 255]);
+    assert!(fb.pixels().iter().all(|p| *p == [0, 0, 0, 0]));
+}
 
-    #[test]
-    fn fill_rect_transparent_color() {
-        let mut fb = FrameBuffer::new(5, 5);
-        // Write something first.
-        fb.fill_rect(0, 0, 5, 5, [255, 0, 0, 255]);
-        // Fill with transparent — should overwrite, not blend.
-        fb.fill_rect(1, 1, 2, 2, [0, 0, 0, 0]);
-        assert_eq!(fb.get_pixel(0, 0), Some(&[255, 0, 0, 255]));
-        assert_eq!(fb.get_pixel(1, 1), Some(&[0, 0, 0, 0]));
-    }
+#[test]
+fn fill_rect_transparent_color() {
+    let mut fb = FrameBuffer::new(5, 5);
+    // Write something first.
+    fb.fill_rect(0, 0, 5, 5, [255, 0, 0, 255]);
+    // Fill with transparent — should overwrite, not blend.
+    fb.fill_rect(1, 1, 2, 2, [0, 0, 0, 0]);
+    assert_eq!(fb.get_pixel(0, 0), Some(&[255, 0, 0, 255]));
+    assert_eq!(fb.get_pixel(1, 1), Some(&[0, 0, 0, 0]));
+}

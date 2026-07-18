@@ -121,7 +121,10 @@ fn protocol_auto_exits_cleanly() {
 #[test]
 fn protocol_unknown_warns_and_falls_back() {
     let (exit_code, _, stderr) = run_binary(&["--protocol", "nonexistent"]);
-    assert_eq!(exit_code, 0, "binary should exit 0 even with unknown protocol");
+    assert_eq!(
+        exit_code, 0,
+        "binary should exit 0 even with unknown protocol"
+    );
     assert!(
         stderr.contains("warning") || stderr.contains("unknown") || stderr.contains("falling back"),
         "stderr should warn about unknown protocol: {stderr}"
@@ -153,7 +156,10 @@ fn probe_flag_exits_cleanly() {
 #[test]
 fn probe_with_explicit_protocol_ignores_probe() {
     let (exit_code, _, stderr) = run_binary(&["--protocol", "sixel", "--probe"]);
-    assert_eq!(exit_code, 0, "binary should exit 0 with --probe + --protocol sixel");
+    assert_eq!(
+        exit_code, 0,
+        "binary should exit 0 with --probe + --protocol sixel"
+    );
     // When --protocol is explicit (not auto), --probe is ignored.
     assert!(
         stderr.contains("sixel"),
@@ -181,7 +187,10 @@ fn tmux_passthrough_flag_exits_cleanly() {
 #[test]
 fn tmux_passthrough_with_kitty_protocol() {
     let (exit_code, _, stderr) = run_binary(&["--tmux-passthrough", "--protocol", "kitty"]);
-    assert_eq!(exit_code, 0, "binary should exit 0 with --tmux-passthrough + --protocol kitty");
+    assert_eq!(
+        exit_code, 0,
+        "binary should exit 0 with --tmux-passthrough + --protocol kitty"
+    );
     assert!(
         stderr.contains("passthrough") || stderr.contains("enabled"),
         "stderr should report passthrough status: {stderr}"
@@ -192,11 +201,7 @@ fn tmux_passthrough_with_kitty_protocol() {
 
 #[test]
 fn combined_flags_exits_cleanly() {
-    let (exit_code, _, _) = run_binary(&[
-        "--protocol", "auto",
-        "--probe",
-        "--tmux-passthrough",
-    ]);
+    let (exit_code, _, _) = run_binary(&["--protocol", "auto", "--probe", "--tmux-passthrough"]);
     assert_eq!(exit_code, 0, "binary should exit 0 with all flags combined");
 }
 
@@ -206,7 +211,10 @@ fn combined_flags_exits_cleanly() {
 #[test]
 fn kitty_protocol_outputs_escape_sequences() {
     let (_, stdout, _) = run_binary(&["--protocol", "kitty"]);
-    assert!(!stdout.is_empty(), "Kitty output must not be empty when feature is enabled");
+    assert!(
+        !stdout.is_empty(),
+        "Kitty output must not be empty when feature is enabled"
+    );
     assert!(
         stdout.starts_with(b"\x1b_G"),
         "Kitty output must start with ESC_G"
@@ -221,7 +229,10 @@ fn kitty_protocol_outputs_escape_sequences() {
 #[test]
 fn sixel_protocol_outputs_data() {
     let (_, stdout, _) = run_binary(&["--protocol", "sixel"]);
-    assert!(!stdout.is_empty(), "Sixel output must not be empty when feature is enabled");
+    assert!(
+        !stdout.is_empty(),
+        "Sixel output must not be empty when feature is enabled"
+    );
     assert!(
         stdout.len() > 10,
         "Sixel output should be substantial (got {} bytes)",

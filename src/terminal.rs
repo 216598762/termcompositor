@@ -95,7 +95,10 @@ mod tests {
     fn detect_returns_some_in_tty() {
         if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
             let s = TerminalSize::detect();
-            assert!(s.is_some(), "detect() should return Some when stdout is a TTY");
+            assert!(
+                s.is_some(),
+                "detect() should return Some when stdout is a TTY"
+            );
             let s = s.unwrap();
             assert!(s.rows > 0, "rows must be positive, got {}", s.rows);
             assert!(s.cols > 0, "cols must be positive, got {}", s.cols);
@@ -132,10 +135,7 @@ mod tests {
             rows: u16::MAX,
             cols: u16::MAX,
         };
-        assert_eq!(
-            s.as_framebuffer_size(),
-            (u16::MAX as u32, u16::MAX as u32)
-        );
+        assert_eq!(s.as_framebuffer_size(), (u16::MAX as u32, u16::MAX as u32));
     }
 
     #[test]
@@ -163,13 +163,15 @@ mod tests {
 
     #[test]
     fn detect_with_size_returns_some_for_valid_input() {
-        let result = detect_with_size(|| {
-            Some((
-                terminal_size::Width(120),
-                terminal_size::Height(40),
-            ))
-        });
-        assert_eq!(result, Some(TerminalSize { rows: 40, cols: 120 }));
+        let result =
+            detect_with_size(|| Some((terminal_size::Width(120), terminal_size::Height(40))));
+        assert_eq!(
+            result,
+            Some(TerminalSize {
+                rows: 40,
+                cols: 120
+            })
+        );
     }
 
     #[test]
@@ -180,17 +182,13 @@ mod tests {
 
     #[test]
     fn detect_with_size_single_cell() {
-        let result = detect_with_size(|| {
-            Some((terminal_size::Width(1), terminal_size::Height(1)))
-        });
+        let result = detect_with_size(|| Some((terminal_size::Width(1), terminal_size::Height(1))));
         assert_eq!(result, Some(TerminalSize { rows: 1, cols: 1 }));
     }
 
     #[test]
     fn detect_with_size_zero_dimensions() {
-        let result = detect_with_size(|| {
-            Some((terminal_size::Width(0), terminal_size::Height(0)))
-        });
+        let result = detect_with_size(|| Some((terminal_size::Width(0), terminal_size::Height(0))));
         assert_eq!(result, Some(TerminalSize { rows: 0, cols: 0 }));
     }
 
@@ -213,9 +211,8 @@ mod tests {
 
     #[test]
     fn detect_with_size_asymmetric() {
-        let result = detect_with_size(|| {
-            Some((terminal_size::Width(200), terminal_size::Height(50)))
-        });
+        let result =
+            detect_with_size(|| Some((terminal_size::Width(200), terminal_size::Height(50))));
         let s = result.unwrap();
         assert_eq!(s.as_framebuffer_size(), (200, 50));
     }

@@ -141,6 +141,7 @@ impl Compositor for CpuCompositor {
 /// Applies a transform to a source framebuffer and composites the
 /// result onto the target within the given bounding box
 /// `[tx_min, ty_min) .. (tx_max, ty_max)`. Uses inverse mapping:
+    #[allow(clippy::too_many_arguments)]
 /// for each target pixel, computes the corresponding source
 /// coordinate via the inverse transform, samples with bilinear
 /// interpolation, and blends onto the target.
@@ -435,18 +436,15 @@ impl LayerStack {
         for r in &regions {
             for y in r.y..r.y.saturating_add(r.height) {
                 for x in r.x..r.x.saturating_add(r.width) {
-                    if let (Some(src), Some(dst)) = (
-                        tmp.get_pixel(x, y),
-                        target.get_pixel_mut(x, y),
-                    ) {
+                    if let (Some(src), Some(dst)) =
+                        (tmp.get_pixel(x, y), target.get_pixel_mut(x, y))
+                    {
                         *dst = *src;
                     }
                 }
             }
         }
     }
-
-
 }
 
 /// A single rectangular dirty region.
@@ -465,7 +463,12 @@ pub struct DirtyRect {
 impl DirtyRect {
     /// Creates a new dirty rectangle.
     pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Returns the right edge (exclusive).
@@ -552,7 +555,11 @@ impl DirtyRegion {
 
     /// Returns the number of dirty regions.
     pub fn region_count(&self) -> usize {
-        if self.full { 1 } else { self.regions.len() }
+        if self.full {
+            1
+        } else {
+            self.regions.len()
+        }
     }
 
     /// Takes all regions out of the tracker (leaving it empty).
@@ -583,10 +590,10 @@ impl Default for LayerStack {
 #[cfg(test)]
 mod tests {
     use super::LayerStack;
+    use super::{DirtyRect, DirtyRegion};
     use crate::framebuffer::FrameBuffer;
     use crate::layer::SolidColor;
     use crate::terminal::TerminalSize;
-    use super::{DirtyRect, DirtyRegion};
 
     #[test]
     fn push_assigns_unique_ids() {
@@ -835,8 +842,11 @@ mod tests {
         s.render(&mut fb);
 
         // The rotated rect should render differently from the unrotated one.
-        assert_ne!(fb_no_t.pixels(), fb.pixels(),
-            "rotated rect should render differently from unrotated");
+        assert_ne!(
+            fb_no_t.pixels(),
+            fb.pixels(),
+            "rotated rect should render differently from unrotated"
+        );
         // And it should have some non-zero pixels.
         let has_content = fb.pixels().iter().any(|p| p[3] > 0);
         assert!(has_content, "rotated rect should produce visible pixels");
@@ -853,16 +863,22 @@ mod tests {
 
         let mut s = LayerStack::new();
         let id = s.push(RectLayer::new(0, 0, 3, 2, [255, 0, 0, 255]));
-        let t = Transform::new()
-            .with_scale(2.0, 2.0)
-            .with_anchor(1.5, 1.0);
+        let t = Transform::new().with_scale(2.0, 2.0).with_anchor(1.5, 1.0);
         s.get_mut(id).unwrap().set_transform(Some(t));
         let mut fb = FrameBuffer::new(10, 10);
         s.render(&mut fb);
 
         // The scaled rect should be larger than the original.
-        let scaled_count = fb.pixels().iter().filter(|p| p[0] > 200 && p[3] > 200).count();
-        let original_count = fb_no_t.pixels().iter().filter(|p| p[0] > 200 && p[3] > 200).count();
+        let scaled_count = fb
+            .pixels()
+            .iter()
+            .filter(|p| p[0] > 200 && p[3] > 200)
+            .count();
+        let original_count = fb_no_t
+            .pixels()
+            .iter()
+            .filter(|p| p[0] > 200 && p[3] > 200)
+            .count();
         assert!(scaled_count > original_count,
             "scaled rect should have more red pixels than original, scaled={scaled_count} original={original_count}");
     }
@@ -878,7 +894,9 @@ mod tests {
 
         let mut s2 = LayerStack::new();
         let id2 = s2.push(RectLayer::new(2, 2, 4, 3, [0, 0, 255, 255]));
-        s2.get_mut(id2).unwrap().set_transform(Some(Transform::new()));
+        s2.get_mut(id2)
+            .unwrap()
+            .set_transform(Some(Transform::new()));
         let mut fb2 = FrameBuffer::new(10, 10);
         s2.render(&mut fb2);
 
@@ -899,7 +917,8 @@ mod tests {
         s.render(&mut fb);
 
         // Find the strongest red pixel (center of scaled rect).
-        let max_alpha = fb.pixels()
+        let max_alpha = fb
+            .pixels()
             .iter()
             .filter(|p| p[0] > 100)
             .map(|p| p[3])
@@ -908,8 +927,10 @@ mod tests {
         // Opacity 0.5 → max alpha ≈ 128.
         // If double-applied: ≈ 64 (too low).
         // If not applied at all: 255 (too high).
-        assert!(max_alpha > 80 && max_alpha < 200,
-            "opacity should be ~128, got alpha={max_alpha}");
+        assert!(
+            max_alpha > 80 && max_alpha < 200,
+            "opacity should be ~128, got alpha={max_alpha}"
+        );
     }
 
     #[test]
@@ -928,8 +949,11 @@ mod tests {
         let mut fb_t = FrameBuffer::new(10, 10);
         s_t.render(&mut fb_t);
 
-        assert_ne!(fb_no_t.pixels(), fb_t.pixels(),
-            "rotated rect should render differently from unrotated");
+        assert_ne!(
+            fb_no_t.pixels(),
+            fb_t.pixels(),
+            "rotated rect should render differently from unrotated"
+        );
     }
 
     #[test]

@@ -7,10 +7,7 @@
 //! and valid protocol bytes, matching what `run_with_config` does
 //! inside its main loop.
 
-use termcompositor::{
-    DirtyRegion,
-    FrameBuffer, LayerStack, RectLayer, SolidColor, DirtyRect,
-};
+use termcompositor::{DirtyRect, DirtyRegion, FrameBuffer, LayerStack, RectLayer, SolidColor};
 
 // ── render_diff with dirty regions ───────────────────────────
 
@@ -259,9 +256,16 @@ mod animation_kitty_pipeline {
         let mut stack = LayerStack::new();
         stack.push(
             GradientLayer::linear(
-                0, 0, 20, 10,
-                [255, 0, 0, 255], [0, 0, 255, 255],
-                0, 0, 20, 10,
+                0,
+                0,
+                20,
+                10,
+                [255, 0, 0, 255],
+                [0, 0, 255, 255],
+                0,
+                0,
+                20,
+                10,
             )
             .with_z(5),
         );
@@ -306,10 +310,7 @@ mod animation_kitty_pipeline {
     fn border_layer_renders_and_encodes() {
         let mut stack = LayerStack::new();
         stack.push(SolidColor::new(0, 0, 64, 255).with_z(0));
-        stack.push(
-            BorderLayer::new(2, 2, 6, 4, [255, 200, 0, 255], 1)
-                .with_z(10),
-        );
+        stack.push(BorderLayer::new(2, 2, 6, 4, [255, 200, 0, 255], 1).with_z(10));
 
         let mut fb = FrameBuffer::new(20, 10);
         stack.render(&mut fb);
@@ -408,7 +409,10 @@ mod animation_sixel_pipeline {
         assert!(!bytes_full.is_empty());
         assert!(!bytes_half.is_empty());
         // Different opacity should produce different output.
-        assert_ne!(bytes_full, bytes_half, "opacity change should alter Sixel output");
+        assert_ne!(
+            bytes_full, bytes_half,
+            "opacity change should alter Sixel output"
+        );
     }
 
     #[test]
@@ -416,16 +420,20 @@ mod animation_sixel_pipeline {
         let mut stack = LayerStack::new();
         stack.push(
             GradientLayer::linear(
-                0, 0, 20, 10,
-                [255, 0, 0, 255], [0, 0, 255, 255],
-                0, 0, 20, 10,
+                0,
+                0,
+                20,
+                10,
+                [255, 0, 0, 255],
+                [0, 0, 255, 255],
+                0,
+                0,
+                20,
+                10,
             )
             .with_z(5),
         );
-        stack.push(
-            BorderLayer::new(1, 1, 8, 6, [0, 255, 200, 255], 2)
-                .with_z(10),
-        );
+        stack.push(BorderLayer::new(1, 1, 8, 6, [0, 255, 200, 255], 2).with_z(10));
 
         let mut fb = FrameBuffer::new(20, 10);
         stack.render(&mut fb);
@@ -494,7 +502,10 @@ mod dirty_region_encoding {
         let bytes2 = Protocol::Kitty.encode(&fb).unwrap();
 
         // Same content, same encoding → same output.
-        assert_eq!(bytes1, bytes2, "identical renders should produce identical bytes");
+        assert_eq!(
+            bytes1, bytes2,
+            "identical renders should produce identical bytes"
+        );
     }
 }
 

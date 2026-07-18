@@ -131,7 +131,8 @@ impl AnimContext {
     /// more efficient than [`mark_full`] when only a small area
     /// of the scene changes.
     pub fn mark_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        self.dirty.mark_rect(crate::compositor::DirtyRect::new(x, y, width, height));
+        self.dirty
+            .mark_rect(crate::compositor::DirtyRect::new(x, y, width, height));
     }
 
     /// Requests a redraw on the next frame.
@@ -443,9 +444,15 @@ mod tests {
         // First frame dt is very small (setup overhead, not zero).
         // Allow a small tolerance to avoid flakiness on slow CI.
         let dt = observed_dt.unwrap();
-        assert!(dt < Duration::from_millis(200), "first frame dt should be < 200ms, got {dt:?}");
+        assert!(
+            dt < Duration::from_millis(200),
+            "first frame dt should be < 200ms, got {dt:?}"
+        );
         let elapsed = observed_elapsed.unwrap();
-        assert!(elapsed < Duration::from_millis(200), "first frame elapsed should be < 200ms, got {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "first frame elapsed should be < 200ms, got {elapsed:?}"
+        );
     }
 
     #[test]
@@ -616,7 +623,10 @@ mod tests {
         // frames), but NOT on frame 2.  The loop invariant guarantees:
         // should_exit && !redraw_requested ⇒ render_and_encode is NOT
         // called, so the final frame was not rendered.
-        assert!(redraw_called, "request_redraw should have been called on non-exit frames");
+        assert!(
+            redraw_called,
+            "request_redraw should have been called on non-exit frames"
+        );
     }
 
     // ─── Edge-case tests ────────────────────────────────────────
@@ -703,7 +713,10 @@ mod tests {
         });
 
         // Elapsed should be non-decreasing.
-        assert!(elapsed_values.len() >= 4, "should have at least 4 elapsed samples");
+        assert!(
+            elapsed_values.len() >= 4,
+            "should have at least 4 elapsed samples"
+        );
         for i in 1..elapsed_values.len() {
             assert!(
                 elapsed_values[i] >= elapsed_values[i - 1],
@@ -731,8 +744,7 @@ mod tests {
 
     #[test]
     fn anim_config_clear_between_frames_false() {
-        let config = AnimConfig::new(60.0)
-            .with_clear_between_frames(false);
+        let config = AnimConfig::new(60.0).with_clear_between_frames(false);
         assert!(!config.clear_between_frames);
 
         // Should run without issues when clear_between_frames is false.
@@ -749,7 +761,11 @@ mod tests {
 
         run_with_stack(stack, 1000.0, |ctx| {
             count += 1;
-            assert_eq!(ctx.frame_count(), 0, "exit on first frame: frame_count should be 0");
+            assert_eq!(
+                ctx.frame_count(),
+                0,
+                "exit on first frame: frame_count should be 0"
+            );
             ctx.exit();
         });
 

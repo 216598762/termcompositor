@@ -338,7 +338,9 @@ mod tests {
 
     #[test]
     fn transform_apply_with_anchor() {
-        let t = Transform::new().with_scale(2.0, 2.0).with_anchor(10.0, 10.0);
+        let t = Transform::new()
+            .with_scale(2.0, 2.0)
+            .with_anchor(10.0, 10.0);
         let (x, y) = t.apply(10.0, 10.0);
         assert!((x - 10.0).abs() < 1e-5);
         assert!((y - 10.0).abs() < 1e-5);
