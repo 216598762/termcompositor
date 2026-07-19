@@ -1245,7 +1245,6 @@ pub struct SceneGraph {
 struct SceneNode {
     layer: Option<Box<dyn Layer>>,
     children: Vec<usize>,
-    #[allow(dead_code)]
     parent: Option<usize>,
     local_offset: (i32, i32),
     local_opacity: f32,
@@ -1360,6 +1359,96 @@ impl SceneGraph {
         if let Some(node) = self.nodes.get_mut(idx) {
             node.local_offset = offset;
         }
+    }
+
+    /// Returns the parent index of a node, or `None` for the root.
+    pub fn parent(&self, idx: usize) -> Option<usize> {
+        self.nodes.get(idx).and_then(|n| n.parent)
+    }
+
+    /// Returns the child indices of a node.
+    pub fn children(&self, idx: usize) -> &[usize] {
+        self.nodes
+            .get(idx)
+            .map(|n| n.children.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Returns an iterator over the ancestor indices of `idx`,
+    /// starting with the immediate parent and ending at the root
+    /// (inclusive).
+    pub fn ancestors(&self, idx: usize) -> Vec<usize> {
+        let mut path = Vec::new();
+        let mut current = self.parent(idx);
+        while let Some(p) = current {
+            path.push(p);
+            current = self.parent(p);
+        }
+        path
+    }
+
+    /// Returns the depth of `idx` from the root. The root is
+    /// at depth 0, its direct children at depth 1, etc.
+    pub fn depth(&self, idx: usize) -> usize {
+        let mut depth = 0;
+        let mut current = self.parent(idx);
+        while let Some(p) = current {
+            depth += 1;
+            current = self.parent(p);
+        }
+        depth
+    }
+
+    /// Collects all descendant indices (children, grandchildren,
+    /// etc.) of `idx` in pre-order. The node itself is not
+    /// included.
+    pub fn descendants(&self, idx: usize) -> Vec<usize> {
+        let mut result = Vec::new();
+        self.descendants_recursive(idx, &mut result);
+        result
+    }
+
+    fn descendants_recursive(&self, idx: usize, out: &mut Vec<usize>) {
+        if let Some(node) = self.nodes.get(idx) {
+            for &child in &node.children {
+                out.push(child);
+                self.descendants_recursive(child, out);
+            }
+        }
+    }
+
+    /// Moves a node to a new parent. The node is removed from
+    /// its current parent's children list and added to the new
+    /// parent. Returns `Ok(())` on success, or `Err(())` if
+    /// the node or new parent index is out of bounds, or if
+    /// the move would create a cycle (i.e. `new_parent` is
+    /// a descendant of `idx`).
+    #[allow(clippy::result_unit_err)]
+    pub fn move_to(&mut self, idx: usize, new_parent: usize) -> Result<(), ()> {
+        if idx >= self.nodes.len() || new_parent >= self.nodes.len() {
+            return Err(());
+        }
+        // Prevent moving a node under itself or its descendants.
+        if idx == new_parent {
+            return Err(());
+        }
+        let mut cursor = Some(new_parent);
+        while let Some(c) = cursor {
+            if c == idx {
+                return Err(());
+            }
+            cursor = self.nodes[c].parent;
+        }
+        // Remove from old parent's children.
+        if let Some(old_parent) = self.nodes[idx].parent {
+            if let Some(p) = self.nodes.get_mut(old_parent) {
+                p.children.retain(|&c| c != idx);
+            }
+        }
+        // Add to new parent's children.
+        self.nodes[new_parent].children.push(idx);
+        self.nodes[idx].parent = Some(new_parent);
+        Ok(())
     }
 
     fn render_node(
@@ -2924,15 +3013,85 @@ fn scene_graph_render_does_not_panic() {
     s.add_child(RectLayer::new(0, 0, 5, 5, [255; 4]));
     let mut fb = FrameBuffer::new(10, 10);
     s.render(&mut fb, (0, 0), 1.0);
-}
+}    #[test]
+    fn scene_graph_empty_render() {
+        let s = SceneGraph::new();
+        let mut fb = FrameBuffer::new(10, 10);
+        s.render(&mut fb, (0, 0), 1.0);
+        assert!(fb.is_fully_transparent());
+    }
 
-#[test]
-fn scene_graph_empty_render() {
-    let s = SceneGraph::new();
-    let mut fb = FrameBuffer::new(10, 10);
-    s.render(&mut fb, (0, 0), 1.0);
-    assert!(fb.is_fully_transparent());
-}
+    #[test]
+    fn scene_graph_parent_child_traversal() {
+        let mut sg = SceneGraph::new();
+        let root = 0;
+        let g1 = sg.add_group((10, 10), 1.0, true);
+        let g2 = sg.add_group_to(g1, (20, 20), 0.5, true);
+        let c1 = sg.add_child_to(g2, RectLayer::new(0, 0, 5, 5, [255; 4]));
+
+        // parent()
+        assert_eq!(sg.parent(root), None);
+        assert_eq!(sg.parent(g1), Some(root));
+        assert_eq!(sg.parent(g2), Some(g1));
+        assert_eq!(sg.parent(c1), Some(g2));
+
+        // children()
+        assert_eq!(sg.children(root), &[g1]);
+        assert_eq!(sg.children(g1), &[g2]);
+        assert_eq!(sg.children(g2), &[c1]);
+        assert!(sg.children(c1).is_empty());
+    }
+
+    #[test]
+    fn scene_graph_ancestors_and_depth() {
+        let mut sg = SceneGraph::new();
+        let g1 = sg.add_group((0, 0), 1.0, true);
+        let g2 = sg.add_group_to(g1, (0, 0), 1.0, true);
+        let c = sg.add_child_to(g2, RectLayer::new(0, 0, 1, 1, [255; 4]));
+
+        assert_eq!(sg.ancestors(c), vec![g2, g1, 0]);
+        assert_eq!(sg.depth(c), 3);
+        assert_eq!(sg.depth(g1), 1);
+        assert_eq!(sg.depth(0), 0);
+    }
+
+    #[test]
+    fn scene_graph_descendants() {
+        let mut sg = SceneGraph::new();
+        let g1 = sg.add_group((0, 0), 1.0, true);
+        let g2 = sg.add_group_to(g1, (0, 0), 1.0, true);
+        let c1 = sg.add_child_to(g1, RectLayer::new(0, 0, 1, 1, [255; 4]));
+        let c2 = sg.add_child_to(g2, RectLayer::new(0, 0, 1, 1, [255; 4]));
+
+        let desc = sg.descendants(0);
+        assert!(desc.contains(&g1));
+        assert!(desc.contains(&c1));
+        assert!(desc.contains(&c2));
+    }
+
+    #[test]
+    fn scene_graph_move_to() {
+        let mut sg = SceneGraph::new();
+        let g1 = sg.add_group((0, 0), 1.0, true);
+        let g2 = sg.add_group((0, 0), 1.0, true);
+        let c = sg.add_child_to(g1, RectLayer::new(0, 0, 1, 1, [255; 4]));
+
+        assert_eq!(sg.parent(c), Some(g1));
+        assert!(sg.move_to(c, g2).is_ok());
+        assert_eq!(sg.parent(c), Some(g2));
+    }
+
+    #[test]
+    fn scene_graph_move_to_cycle_detected() {
+        let mut sg = SceneGraph::new();
+        let g1 = sg.add_group((0, 0), 1.0, true);
+        let g2 = sg.add_group_to(g1, (0, 0), 1.0, true);
+
+        // Moving g1 under g2 would create a cycle.
+        assert!(sg.move_to(g1, g2).is_err());
+        // Moving under self is rejected.
+        assert!(sg.move_to(g1, g1).is_err());
+    }
 
 // ─── ClipLayer tests ────────────────────────────────────────
 

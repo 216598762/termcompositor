@@ -45,9 +45,11 @@ loading fonts from file paths. Store the font data in the struct instead.
 **Current approach:** ```Box::leak(data.into_boxed_slice())```
 **Proposed:** Store `Vec<u8>` in a `OnceLock<Vec<u8>>` field alongside `OnceLock<Font>`.
 
-### 3. SceneNode Parent Field Activation
-`SceneNode::parent` is currently `#[allow(dead_code)]` — implement parent-child
-traversal or remove the field if not needed.
+### 3. SceneNode Parent Field Activation ✅ Completed
+Implemented parent-child traversal with `parent()`, `children()`, `ancestors()`,
+`depth()`, `descendants()`, and `move_to()` methods. Added cycle detection
+in `move_to()` to prevent creating cycles. Removed `#[allow(dead_code)]` from
+the parent field since it's now actively used.
 
 ---
 
@@ -163,7 +165,7 @@ readers or headless terminals.
 | v0.14.0 | Animation loop, Layer transforms | ✅ Completed |
 | v0.15.0 | Layer clipping, Rounded corners, Shadow effects | ✅ Completed |
 | v1.0.0 | SVG layer, Scene graph, Accessibility metadata | ✅ Completed |
-| v2.0.0 | GradientLayer builder, FontSource leak fix, SceneNode parent | 🔜 Planned |
+| v2.0.0 | GradientLayer builder, FontSource leak fix, SceneNode parent | ✅ Completed |
 
 ## Completed Features Summary
 
