@@ -13,8 +13,14 @@ no shell input. You build a frame, `termcompositor` encodes it.
 
 - **Animation loop** — built-in frame loop with delta-time tracking, terminal resize handling, and opt-in rendering via `animation::run()`. CLI flags: `--animate` and `--fps <N>`.
 - **Layer transforms** — per-layer rotation and scaling via `Transform` with anchor points and bilinear interpolation.
-- **Rich layer types** — `SolidColor`, `RectLayer`, `TextLayer`, `GradientLayer` (builder API), `BorderLayer`, `CanvasLayer`, `DropShadow`, `SceneGraph` (parent-child traversal).
+- **Rich layer types** — `SolidColor`, `RectLayer`, `TextLayer`, `GradientLayer`, `BorderLayer`, `CanvasLayer`, `DropShadow`, `SceneGraph`.
 - **Dual protocol support** — Kitty graphics protocol and Sixel, with auto-detection.
+
+## What's new in v2.0.0
+
+- **GradientLayer Builder** — `GradientLayer::linear()` and `GradientLayer::radial()` replaced by a fluent `GradientLayerBuilder` API with `new_linear()`, `new_radial()`, `at()`, `size()`, `colors()`, etc.
+- **FontSource memory leak fix** — `TextLayer::with_font(FontSource::Path)` no longer leaks memory.
+- **SceneNode parent-child traversal** — `SceneGraph` now supports `parent()`, `children()`, `ancestors()`, `depth()`, `descendants()`, and `move_to()` with cycle detection.
 
 ## Architecture (one line)
 
