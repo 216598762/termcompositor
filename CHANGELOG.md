@@ -1,3 +1,56 @@
+## 2.0.0 (Unreleased)
+
+The v2.0.0 milestone completes the ROADMAP with API improvements,
+technical debt fixes, and developer experience enhancements.
+
+### Added
+
+- **GradientLayer Builder Pattern** (`src/layer.rs`): refactored the
+  verbose `GradientLayer::linear()` (10 args) and `GradientLayer::radial()`
+  (9 args) constructors into a fluent builder API.
+  - `GradientLayerBuilder` struct with methods: `new_linear()`, `new_radial()`,
+    `at()`, `size()`, `colors()`, `linear_points()`, `radial_params()`,
+    `with_z()`, `with_name()`, `build()`.
+  - Deprecated the old `GradientLayer::linear()` and `GradientLayer::radial()`
+    constructors with `#[deprecated(since = "2.0.0")]` for backwards
+    compatibility.
+  - Added `debug_assert!` to `linear_points()` and `radial_params()` to
+    catch misuse in debug builds.
+  - `Default` impl returns `new_linear()`.
+  - `GradientLayerBuilder` re-exported from the crate root.
+  - 6 unit tests: `gradient_builder_api`, `gradient_builder_radial`,
+    `gradient_builder_default`, `gradient_builder_zero_length_line`,
+    `gradient_builder_linear_points_on_radial_panics`,
+    `gradient_builder_radial_params_on_linear_panics`.
+
+- **FontSource Memory Leak Fix** (`src/layer.rs`): eliminated the memory
+  leak in `FontSource::Path` by replacing `Box::leak()` with a properly
+  owned storage.
+  - Added `font_data: OnceLock<Vec<u8>>` field to `TextLayer` to store
+    font data for `FontSource::Path`.
+  - `ensure_font()` now uses `font_data.get_or_init()` to lazily load
+    font data instead of leaking it with `Box::leak()`.
+  - Font data is now properly dropped when `TextLayer` is dropped.
+
+- **SceneNode Parent Field Activation** (`src/layer.rs`): activated the
+  previously dead-code `SceneNode::parent` field with full parent-child
+  traversal support.
+  - `parent() -> Option<usize>`: returns the parent node index.
+  - `children() -> &[usize]` / `children_mut() -> &mut Vec<usize>`:
+    access child node indices.
+  - `ancestors(idx) -> Vec<usize>`: returns all ancestor indices from
+    parent up to and including the root.
+  - `depth(idx) -> usize`: returns the depth from root using an
+    iterative loop (no allocation).
+  - `descendants(idx) -> Vec<usize>`: returns all descendants in
+    pre-order traversal.
+  - `move_to(idx, new_parent) -> Result<(), usize>`: reparents a node
+    with cycle detection to prevent creating cycles.
+  - Removed `#[allow(dead_code)]` from the `parent` field.
+  - 5 unit tests: `scene_graph_parent_child_traversal`,
+    `scene_graph_ancestors_and_depth`, `scene_graph_descendants`,
+    `scene_graph_move_to`, `scene_graph_move_to_cycle_detected`.
+
 ## 1.0.0 (2026-07-18)
 
 The v1.0.0 milestone release completes the ROADMAP with accessibility
