@@ -13,7 +13,7 @@ no shell input. You build a frame, `termcompositor` encodes it.
 
 - **Animation loop** — built-in frame loop with delta-time tracking, terminal resize handling, and opt-in rendering via `animation::run()`. CLI flags: `--animate` and `--fps <N>`.
 - **Layer transforms** — per-layer rotation and scaling via `Transform` with anchor points and bilinear interpolation.
-- **Rich layer types** — `SolidColor`, `RectLayer`, `TextLayer`, `GradientLayer`, `BorderLayer`, `CanvasLayer`, `DropShadow`, `SceneGraph`.
+- **Rich layer types** — `SolidColor`, `RectLayer`, `TextLayer`, `GradientLayer` (builder API), `BorderLayer`, `CanvasLayer`, `DropShadow`, `SceneGraph` (parent-child traversal).
 - **Dual protocol support** — Kitty graphics protocol and Sixel, with auto-detection.
 
 ## Architecture (one line)
