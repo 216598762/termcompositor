@@ -232,6 +232,28 @@ let mut writer = BufWriter::new(std::io::stdout().lock());
 sixel::encode_to_writer_streaming(&fb, &mut writer).unwrap();
 ```
 
+### FrameBuffer::fill_rect
+
+Fill a rectangular region with a solid colour. Coordinates outside the
+framebuffer are silently clipped:
+
+```rust
+use termcompositor::FrameBuffer;
+
+let mut fb = FrameBuffer::new(80, 24);
+fb.fill_rect(10, 5, 20, 8, [255, 0, 0, 255]); // red rectangle
+fb.fill_rect(0, 0, 80, 1, [0, 0, 0, 255]);    // black header
+```
+
+| Parameter | Description |
+|---|---|
+| `rx, ry` | Top-left corner of the rectangle (u32) |
+| `rw, rh` | Width and height of the rectangle (u32) |
+| `color` | RGBA colour `[r, g, b, a]` |
+
+The method uses direct slice writes for performance and clips silently
+when the rectangle extends beyond the framebuffer bounds.
+
 ---
 
 ## Animation loop
