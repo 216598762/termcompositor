@@ -75,10 +75,10 @@ jobs:
       - name: cargo check (default features)
         run: cargo check --verbose
 
-      - name: cargo check (all features)
+      - name: cargo check (no default features)
         # Exclude kitty-encoder, sixel-encoder, image-decoder: their deps
         # (little-kitty, quantette, moxcms) require the 2024 edition (Rust >= 1.85).
-        run: cargo check --features font-rasterizer --verbose
+        run: cargo check --no-default-features --verbose
 
   validate:
     name: validate (${{ matrix.features || 'default' }})
