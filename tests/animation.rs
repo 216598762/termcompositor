@@ -7,7 +7,13 @@
 //! and valid protocol bytes, matching what `run_with_config` does
 //! inside its main loop.
 
-use termcompositor::{DirtyRect, DirtyRegion, FrameBuffer, LayerStack, RectLayer, SolidColor};
+use termcompositor::{DropShadow,
+    BorderLayer, CanvasLayer, ClipLayer, ClipRegion, DirtyRect, DirtyRegion,
+    dispatch_to_writer, FrameBuffer, GradientLayer, LayerStack, Protocol,
+    ProtocolEncoder, Rect, RectLayer, SolidColor,
+};
+#[cfg(feature = "font-rasterizer")]
+use termcompositor::TextLayer;
 
 // ── render_diff with dirty regions ───────────────────────────
 
@@ -166,14 +172,14 @@ mod animation_kitty_pipeline {
         // Simulate what the animation loop does: create layers,
         // render, modify opacity, render again.
         let mut stack = LayerStack::new();
-        let bg = stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
+        let _bg = stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
         let fg = stack.push(SolidColor::new(255, 0, 0, 255).with_z(10));
 
         let mut fb = FrameBuffer::new(10, 10);
 
         // Frame 1: full opacity.
         stack.render(&mut fb);
-        let px_full = fb.get_pixel(5, 5).unwrap().clone();
+        let px_full = *fb.get_pixel(5, 5).unwrap();
 
         // Frame 2: reduce opacity to 50% and clear framebuffer.
         if let Some(entry) = stack.get_mut(fg) {
@@ -183,7 +189,7 @@ mod animation_kitty_pipeline {
             *px = [0, 0, 0, 0];
         }
         stack.render(&mut fb);
-        let px_half = fb.get_pixel(5, 5).unwrap().clone();
+        let px_half = *fb.get_pixel(5, 5).unwrap();
 
         // Full-opacity red should have higher R than half-opacity.
         assert!(
@@ -207,7 +213,7 @@ mod animation_kitty_pipeline {
 
         let mut fb = FrameBuffer::new(10, 10);
         stack.render(&mut fb);
-        let px_with = fb.get_pixel(5, 5).unwrap().clone();
+        let px_with = *fb.get_pixel(5, 5).unwrap();
 
         // Remove the yellow rect layer.
         stack.remove(tmp);
@@ -217,7 +223,7 @@ mod animation_kitty_pipeline {
             *px = [0, 0, 0, 0];
         }
         stack.render(&mut fb);
-        let px_without = fb.get_pixel(5, 5).unwrap().clone();
+        let px_without = *fb.get_pixel(5, 5).unwrap();
 
         // With the yellow rect: R=255, G=255.
         assert_eq!(px_with[0], 255, "yellow rect R");
@@ -345,7 +351,10 @@ mod animation_kitty_pipeline {
     #[test]
     fn clip_layer_renders_and_encodes() {
         let inner = RectLayer::new(0, 0, 20, 10, [255, 0, 0, 255]);
-        let clip = ClipLayer::new(Box::new(inner), 0, 0, 5, 5).with_z(10);
+        // Clip to a 5×5 rect at (0,0) — pixel (10,5) will be outside.
+        let clip = ClipLayer::new(Box::new(inner))
+            .with_region(ClipRegion::Rect(Rect::new(0, 0, 5, 5)))
+            .with_z(10);
 
         let mut stack = LayerStack::new();
         stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
@@ -388,7 +397,7 @@ mod animation_sixel_pipeline {
     #[test]
     fn animated_opacity_sixel_pipeline() {
         let mut stack = LayerStack::new();
-        let bg = stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
+        let _bg = stack.push(SolidColor::new(0, 0, 0, 255).with_z(0));
         let fg = stack.push(SolidColor::new(255, 0, 0, 255).with_z(10));
 
         let mut fb = FrameBuffer::new(10, 10);
@@ -513,7 +522,7 @@ mod dirty_region_encoding {
 
 // ── Text layer in animation pipeline ──────────────────────────
 
-#[cfg(feature = "kitty-encoder")]
+#[cfg(all(feature = "kitty-encoder", feature = "font-rasterizer"))]
 mod text_layer_pipeline {
     use super::*;
 

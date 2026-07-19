@@ -761,6 +761,6 @@ mod scene_graph_pipeline {
         assert!(!bytes.is_empty());
         let px = fb.get_pixel(2, 2).unwrap();
         let alpha = px[3] as i32;
-        assert!(alpha >= 126 && alpha <= 130, "alpha was {}", alpha);
+        assert!((126..=130).contains(&alpha), "alpha was {}", alpha);
     }
 }

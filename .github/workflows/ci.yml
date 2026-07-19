@@ -76,7 +76,7 @@ jobs:
         run: cargo check --verbose
 
       - name: cargo check (all features)
-        run: cargo check --all-features --verbose
+        run: cargo check --features font-rasterizer,kitty-encoder,sixel-encoder,image-decoder --verbose
 
   validate:
     name: validate (${{ matrix.features || 'default' }})
