@@ -1,4 +1,4 @@
-## 2.0.0 (Unreleased)
+## 2.0.0 (2026-07-19)
 
 The v2.0.0 milestone completes the ROADMAP with API improvements,
 technical debt fixes, and developer experience enhancements.

@@ -1,6 +1,6 @@
 [package]
 name = "termcompositor"
-version = "0.11.0"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.73"
 description = "Layer-based graphics compositor for the terminal (Kitty graphics protocol / Sixel)"

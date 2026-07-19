@@ -173,7 +173,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let size = TerminalSize::current();
     eprintln!(
-        "termcompositor v0.14.0 -- multi-layer + auto-detect encoder + animation: \
+        "termcompositor v2.0.0 -- multi-layer + auto-detect encoder + animation: \
 host terminal = {cols} cols x {rows} rows",
         cols = size.cols,
         rows = size.rows,
@@ -265,7 +265,7 @@ using the env-var shim instead"
                 .with_name("anim-bar"),
         );
         let _label = stack.push(
-            TextLayer::new(2, 1, "termcompositor v0.14.0 — animation demo", [255; 4])
+            TextLayer::new(2, 1, "termcompositor v2.0.0 — animation demo", [255; 4])
                 .with_z(20)
                 .with_name("anim-title"),
         );
