@@ -43,9 +43,14 @@ Layers → compositor → FrameBuffer → protocol encoder → terminal stdout
 
 Enable at least one encoder feature to produce terminal output.
 
+> **Note:** `kitty-encoder`, `sixel-encoder`, and `image-decoder` depend on crates that
+> require the **Rust 2024 edition** (Rust ≥ 1.85). If you are using an older toolchain,
+> stick with the default features (`font-rasterizer` only).
+
 ## MSRV
 
-**1.73** — pinned in `Cargo.toml` and validated in CI.
+**1.73** — pinned in `Cargo.toml` and validated in CI. Only the `font-rasterizer` and
+`image-decoder` features are tested on Rust 1.73; the encoder features require Rust ≥ 1.85.
 
 ## License
 
